@@ -12,6 +12,11 @@
       "root": "backend",
       "entrypoint": "src/app.js",
       "routePrefix": "/api"
+    },
+    "frontend": {
+      "root": "frontend",
+      "routePrefix": "/",
+      "framework": "vite"
     }
   }
 }
