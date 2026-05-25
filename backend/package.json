@@ -8,18 +8,23 @@
     "start": "node src/app.js",
     "db:migrate": "node src/database/migrate.js"
   },
-  "keywords": ["cotizaciones", "supermercado", "api"],
+  "keywords": [
+    "cotizaciones",
+    "supermercado",
+    "api"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2",
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
-    "sql.js": "^1.10.3",
-    "bcryptjs": "^2.4.3",
+    "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^6.9.9",
     "pdfkit": "^0.14.0",
-    "nodemailer": "^6.9.9"
+    "pg": "^8.21.0",
+    "sql.js": "^1.10.3"
   },
   "devDependencies": {
     "nodemon": "^3.0.3"

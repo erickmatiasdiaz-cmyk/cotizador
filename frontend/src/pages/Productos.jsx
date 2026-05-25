@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { getProductos, getCategorias, createProducto, updateProducto, deleteProducto } from '../services/api';
+import { formatCurrency } from '../utils/formatters';
 
 const Productos = () => {
   const [productos, setProductos] = useState([]);
@@ -254,6 +255,7 @@ const Productos = () => {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-200">
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Imagen</th>
                   <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Nombre</th>
                   <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Categoría</th>
                   <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Precio</th>
@@ -265,9 +267,23 @@ const Productos = () => {
               <tbody>
                 {productos.map((producto) => (
                   <tr key={producto.id} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="py-3 px-4">
+                      {producto.imagen_url ? (
+                        <img 
+                          src={producto.imagen_url} 
+                          alt={producto.nombre} 
+                          className="w-10 h-10 object-cover rounded shadow-sm"
+                          onError={(e) => { e.target.src = 'https://via.placeholder.com/40?text=📦'; }}
+                        />
+                      ) : (
+                        <div className="w-10 h-10 bg-gray-100 rounded flex items-center justify-center text-xl shadow-sm border border-gray-200">
+                          📦
+                        </div>
+                      )}
+                    </td>
                     <td className="py-3 px-4 text-sm font-medium">{producto.nombre}</td>
                     <td className="py-3 px-4 text-sm">{producto.categoria || '-'}</td>
-                    <td className="py-3 px-4 text-sm font-semibold">${producto.precio_unitario.toFixed(2)}</td>
+                    <td className="py-3 px-4 text-sm font-semibold text-blue-900">{formatCurrency(producto.precio_unitario)}</td>
                     <td className="py-3 px-4 text-sm">
                       <span className={`px-2 py-1 rounded text-xs font-semibold ${
                         producto.stock_actual > 10 

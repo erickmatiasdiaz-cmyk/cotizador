@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const migrate = require('./database/migrate');
 const { initDb } = require('./config/database');
 
@@ -8,7 +9,14 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(cors());
+const allowedOrigins = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin: allowedOrigins.length > 0 ? allowedOrigins : true
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
@@ -19,6 +27,7 @@ const productosRoutes = require('./routes/productos');
 const cotizacionesRoutes = require('./routes/cotizaciones');
 const configuracionRoutes = require('./routes/configuracion');
 const publicRoutes = require('./routes/public');
+const categoriasRoutes = require('./routes/categorias');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/clientes', clientesRoutes);
@@ -26,6 +35,7 @@ app.use('/api/productos', productosRoutes);
 app.use('/api/cotizaciones', cotizacionesRoutes);
 app.use('/api/configuracion', configuracionRoutes);
 app.use('/api/public', publicRoutes);
+app.use('/api/categorias', categoriasRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -45,6 +55,16 @@ app.get('/', (req, res) => {
     }
   });
 });
+
+// Servir el frontend compilado cuando exista. Esto facilita subir todo como una app.
+const frontendDist = path.join(__dirname, '..', '..', 'frontend', 'dist');
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(frontendDist));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(frontendDist, 'index.html'));
+  });
+}
 
 // Manejo de errores 404
 app.use((req, res) => {
@@ -75,6 +95,11 @@ async function start() {
   app.listen(PORT);
 }
 
-start();
+if (require.main === module) {
+  start().catch(error => {
+    console.error(error);
+    process.exit(1);
+  });
+}
 
 module.exports = app;

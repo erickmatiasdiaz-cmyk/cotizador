@@ -1,5 +1,6 @@
 const migrate = require('../database/migrate');
 const { initDb, saveDb } = require('../config/database');
+const { applyPremiumDemoData } = require('./premiumDemoData');
 
 async function seed() {
   console.log('🔄 Ejecutando migraciones primero...');
@@ -22,10 +23,10 @@ async function seed() {
     { nombre: 'Fernando Castillo Ortiz', empresa: 'Abarrotes Don Fernando', rfc: 'ADF750601GHI', email: 'fernando@donfernando.com', telefono: '555-8901', direccion: 'Av. Constitución #678', tipo: 'juridica' }
   ];
 
-  clientes.forEach(c => {
-    db.run(`INSERT OR IGNORE INTO clientes (nombre, empresa, rfc, email, telefono, direccion, tipo) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  for (const c of clientes) {
+    await db.run(`INSERT OR IGNORE INTO clientes (nombre, empresa, rfc, email, telefono, direccion, tipo) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [c.nombre, c.empresa, c.rfc, c.email, c.telefono, c.direccion, c.tipo]);
-  });
+  }
   saveDb();
   console.log(`✅ ${clientes.length} clientes agregados`);
 
@@ -84,12 +85,15 @@ async function seed() {
     { nombre: 'Chiles Jalapeños 220g', descripcion: 'Chiles jalapeños en escabeche', categoria_id: 10, precio_unitario: 20.00, stock_actual: 110, unidad_medida: 'unidad' }
   ];
 
-  productos.forEach(p => {
-    db.run(`INSERT OR IGNORE INTO productos (nombre, descripcion, categoria_id, precio_unitario, stock_actual, unidad_medida) VALUES (?, ?, ?, ?, ?, ?)`,
+  for (const p of productos) {
+    await db.run(`INSERT OR IGNORE INTO productos (nombre, descripcion, categoria_id, precio_unitario, stock_actual, unidad_medida) VALUES (?, ?, ?, ?, ?, ?)`,
       [p.nombre, p.descripcion, p.categoria_id, p.precio_unitario, p.stock_actual, p.unidad_medida]);
-  });
+  }
   saveDb();
   console.log(`✅ ${productos.length} productos agregados`);
+
+  await applyPremiumDemoData();
+  console.log('Usuarios demo e imagenes premium actualizados');
 
   console.log('\n🎉 Datos de ejemplo cargados exitosamente');
   console.log('📊 Total: 10 clientes, 51 productos en 10 categorías');

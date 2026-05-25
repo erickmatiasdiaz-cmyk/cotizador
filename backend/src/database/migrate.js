@@ -1,12 +1,17 @@
 const { initDb, saveDb } = require('../config/database');
 const bcrypt = require('bcryptjs');
+const { applyPremiumDemoData } = require('./premiumDemoData');
 
 async function migrate() {
   console.log('Ejecutando migraciones...');
   const db = await initDb();
+  if (db.isPostgres) {
+    console.log('Postgres detectado: las migraciones se administran desde Supabase.');
+    return;
+  }
 
   // Tabla de usuarios
-  db.run(`
+  await db.run(`
     CREATE TABLE IF NOT EXISTS usuarios (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nombre TEXT NOT NULL,
@@ -19,7 +24,7 @@ async function migrate() {
   saveDb();
 
   // Tabla de clientes
-  db.run(`
+  await db.run(`
     CREATE TABLE IF NOT EXISTS clientes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nombre TEXT NOT NULL,
@@ -35,17 +40,19 @@ async function migrate() {
   saveDb();
 
   // Tabla de categorías
-  db.run(`
+  await db.run(`
     CREATE TABLE IF NOT EXISTS categorias (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nombre TEXT NOT NULL,
+      nombre TEXT NOT NULL UNIQUE,
       descripcion TEXT
     )
   `);
+  // Asegurar índice único por nombre (para bases de datos ya creadas)
+  await db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_categoria_nombre ON categorias(nombre)`);
   saveDb();
 
   // Tabla de productos
-  db.run(`
+  await db.run(`
     CREATE TABLE IF NOT EXISTS productos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nombre TEXT NOT NULL,
@@ -61,7 +68,7 @@ async function migrate() {
   saveDb();
 
   // Tabla de cotizaciones
-  db.run(`
+  await db.run(`
     CREATE TABLE IF NOT EXISTS cotizaciones (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       numero TEXT UNIQUE NOT NULL,
@@ -88,7 +95,7 @@ async function migrate() {
   saveDb();
 
   // Tabla de items de cotización
-  db.run(`
+  await db.run(`
     CREATE TABLE IF NOT EXISTS cotizacion_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       cotizacion_id INTEGER NOT NULL,
@@ -103,11 +110,25 @@ async function migrate() {
   saveDb();
 
   // Tabla de configuración
-  db.run(`
+  await db.run(`
     CREATE TABLE IF NOT EXISTS configuracion (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       clave TEXT UNIQUE NOT NULL,
       valor TEXT NOT NULL
+    )
+  `);
+  saveDb();
+
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS auditoria (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      usuario_id INTEGER,
+      usuario_email TEXT,
+      accion TEXT NOT NULL,
+      entidad TEXT NOT NULL,
+      entidad_id INTEGER,
+      detalle TEXT,
+      creado_en DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
   saveDb();
@@ -122,16 +143,16 @@ async function migrate() {
     ['MONEDA', 'MXN']
   ];
 
-  configDefaults.forEach(([clave, valor]) => {
-    db.run(`INSERT OR IGNORE INTO configuracion (clave, valor) VALUES (?, ?)`, [clave, valor]);
-  });
+  for (const [clave, valor] of configDefaults) {
+    await db.run(`INSERT OR IGNORE INTO configuracion (clave, valor) VALUES (?, ?)`, [clave, valor]);
+  }
   saveDb();
 
   // Insertar usuario admin por defecto
-  const existingUser = db.exec(`SELECT id FROM usuarios WHERE email = 'admin@supermercado.com'`);
+  const existingUser = await db.exec(`SELECT id FROM usuarios WHERE email = 'admin@supermercado.com'`);
   if (existingUser.length === 0 || existingUser[0].values.length === 0) {
     const hashedPassword = bcrypt.hashSync('admin123', 10);
-    db.run(`INSERT INTO usuarios (nombre, email, password, rol) VALUES (?, ?, ?, ?)`,
+    await db.run(`INSERT INTO usuarios (nombre, email, password, rol) VALUES (?, ?, ?, ?)`,
       ['Administrador', 'admin@supermercado.com', hashedPassword, 'admin']);
     saveDb();
     console.log('👤 Usuario admin creado');
@@ -151,11 +172,14 @@ async function migrate() {
     ['Enlatados', 'Productos enlatados y conservas']
   ];
 
-  categoriasEjemplo.forEach(([nombre, descripcion]) => {
-    db.run(`INSERT OR IGNORE INTO categorias (nombre, descripcion) VALUES (?, ?)`, [nombre, descripcion]);
-  });
+  for (const [nombre, descripcion] of categoriasEjemplo) {
+    await db.run(`INSERT OR IGNORE INTO categorias (nombre, descripcion) VALUES (?, ?)`, [nombre, descripcion]);
+  }
   saveDb();
   console.log('📂 Categorías creadas');
+
+  await applyPremiumDemoData();
+  console.log('Usuarios demo e imagenes premium cargados');
 
   console.log('✅ Migraciones completadas exitosamente');
 }

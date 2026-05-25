@@ -1,4 +1,5 @@
 const { initDb, saveDb } = require('../config/database');
+const { audit } = require('../utils/auditLogger');
 
 class CotizacionController {
   async getAll(req, res) {
@@ -8,16 +9,16 @@ class CotizacionController {
       
       let query = `
         SELECT 
-          c.id, c.numero, c.cliente_id, cl.nombre as cliente_nombre, 
+          c.id, c.numero, c.cliente_id, COALESCE(cl.nombre, '(Cliente eliminado)') as cliente_nombre, 
           cl.empresa as cliente_empresa,
-          c.usuario_id, u.nombre as usuario_nombre,
+          c.usuario_id, COALESCE(u.nombre, '(Usuario eliminado)') as usuario_nombre,
           c.subtotal, c.iva, c.descuento_porcentaje, c.descuento_monto, c.total,
           c.notas, c.validez_dias, c.fecha_validez, c.estado,
           c.enviado_email, c.creado_en, c.actualizado_en,
           c.factura_numero, c.factura_fecha
         FROM cotizaciones c
-        INNER JOIN clientes cl ON c.cliente_id = cl.id
-        INNER JOIN usuarios u ON c.usuario_id = u.id
+        LEFT JOIN clientes cl ON c.cliente_id = cl.id
+        LEFT JOIN usuarios u ON c.usuario_id = u.id
         WHERE 1=1
       `;
 
@@ -38,7 +39,7 @@ class CotizacionController {
       }
       query += ` ORDER BY c.creado_en DESC`;
 
-      const result = db.exec(query);
+      const result = await db.exec(query);
       const cotizaciones = result.length > 0 ? result[0].values.map(row => ({
         id: row[0], numero: row[1], cliente_id: row[2], cliente_nombre: row[3],
         cliente_empresa: row[4], usuario_id: row[5], usuario_nombre: row[6],
@@ -61,21 +62,21 @@ class CotizacionController {
       const db = await initDb();
       const query = `
         SELECT 
-          c.id, c.numero, c.cliente_id, cl.nombre as cliente_nombre, 
+          c.id, c.numero, c.cliente_id, COALESCE(cl.nombre, '(Cliente eliminado)') as cliente_nombre, 
           cl.empresa as cliente_empresa, cl.rfc as cliente_rfc,
           cl.email as cliente_email, cl.telefono as cliente_telefono,
           cl.direccion as cliente_direccion,
-          c.usuario_id, u.nombre as usuario_nombre, u.email as usuario_email,
+          c.usuario_id, COALESCE(u.nombre, '(Usuario eliminado)') as usuario_nombre, u.email as usuario_email,
           c.subtotal, c.iva, c.descuento_porcentaje, c.descuento_monto, c.total,
           c.notas, c.validez_dias, c.fecha_validez, c.estado,
           c.enviado_email, c.creado_en, c.actualizado_en,
           c.factura_numero, c.factura_fecha
         FROM cotizaciones c
-        INNER JOIN clientes cl ON c.cliente_id = cl.id
-        INNER JOIN usuarios u ON c.usuario_id = u.id
+        LEFT JOIN clientes cl ON c.cliente_id = cl.id
+        LEFT JOIN usuarios u ON c.usuario_id = u.id
         WHERE c.id = ${req.params.id}
       `;
-      const result = db.exec(query);
+      const result = await db.exec(query);
       
       if (result.length === 0 || result[0].values.length === 0) {
         return res.status(404).json({ error: 'Cotización no encontrada' });
@@ -94,7 +95,7 @@ class CotizacionController {
         factura_numero: row[24], factura_fecha: row[25]
       };
 
-      const itemsResult = db.exec(`
+      const itemsResult = await db.exec(`
         SELECT ci.id, ci.producto_id, p.nombre as producto_nombre,
                p.descripcion as producto_descripcion,
                ci.cantidad, ci.precio_unitario, ci.subtotal
@@ -128,7 +129,7 @@ class CotizacionController {
       const db = await initDb();
 
       // Verificar cliente
-      const clienteResult = db.exec(`SELECT id FROM clientes WHERE id = ${cliente_id}`);
+      const clienteResult = await db.exec(`SELECT id FROM clientes WHERE id = ${cliente_id}`);
       if (clienteResult.length === 0 || clienteResult[0].values.length === 0) {
         return res.status(404).json({ error: 'Cliente no encontrado' });
       }
@@ -137,19 +138,50 @@ class CotizacionController {
       const fecha = new Date();
       const year = fecha.getFullYear();
       const month = String(fecha.getMonth() + 1).padStart(2, '0');
-      const countResult = db.exec(`SELECT COUNT(*) FROM cotizaciones WHERE strftime('%Y', creado_en) = '${year}'`);
+      const countResult = await db.exec(`SELECT COUNT(*) FROM cotizaciones WHERE strftime('%Y', creado_en) = '${year}'`);
       const count = countResult.length > 0 ? countResult[0].values[0][0] : 0;
       const numero = `COT-${year}${month}-${String(count + 1).padStart(4, '0')}`;
 
-      // Calcular totales
+      // Calcular totales y validar stock disponible.
       let subtotal = 0;
+      const itemsValidados = [];
+
       for (const item of items) {
-        const prodResult = db.exec(`SELECT precio_unitario FROM productos WHERE id = ${item.producto_id}`);
-        const precioUnitario = item.precio_unitario || (prodResult.length > 0 ? prodResult[0].values[0][0] : 0);
-        subtotal += item.cantidad * precioUnitario;
+        const productoId = Number(item.producto_id);
+        const cantidad = Number(item.cantidad);
+
+        if (!Number.isInteger(productoId) || !Number.isFinite(cantidad) || cantidad <= 0) {
+          return res.status(400).json({ error: 'Todos los items deben tener producto y cantidad valida' });
+        }
+
+        const prodResult = await db.exec(`SELECT id, nombre, precio_unitario, stock_actual FROM productos WHERE id = ${productoId}`);
+        if (prodResult.length === 0 || prodResult[0].values.length === 0) {
+          return res.status(404).json({ error: `Producto ${productoId} no encontrado` });
+        }
+
+        const prodRow = prodResult[0].values[0];
+        const stockActual = Number(prodRow[3]);
+
+        if (cantidad > stockActual) {
+          return res.status(400).json({
+            error: `Stock insuficiente para ${prodRow[1]}. Disponible: ${stockActual}`
+          });
+        }
+
+        const precioUnitario = item.precio_unitario !== undefined && item.precio_unitario !== null
+          ? Number(item.precio_unitario)
+          : Number(prodRow[2]);
+
+        if (!Number.isFinite(precioUnitario) || precioUnitario < 0) {
+          return res.status(400).json({ error: `Precio invalido para ${prodRow[1]}` });
+        }
+
+        const itemSubtotal = cantidad * precioUnitario;
+        subtotal += itemSubtotal;
+        itemsValidados.push({ producto_id: productoId, cantidad, precio_unitario: precioUnitario, subtotal: itemSubtotal });
       }
 
-      const configResult = db.exec(`SELECT valor FROM configuracion WHERE clave = 'IVA_PORCENTAJE'`);
+      const configResult = await db.exec(`SELECT valor FROM configuracion WHERE clave = 'IVA_PORCENTAJE'`);
       const ivaPorcentaje = configResult.length > 0 ? parseFloat(configResult[0].values[0][0]) : 16;
       const descuentoMonto = descuento_porcentaje ? subtotal * (descuento_porcentaje / 100) : 0;
       const subtotalConDescuento = subtotal - descuentoMonto;
@@ -160,7 +192,7 @@ class CotizacionController {
       fechaValidez.setDate(fechaValidez.getDate() + (validez_dias || 15));
 
       // Insertar cotización
-      db.run(`INSERT INTO cotizaciones 
+      await db.run(`INSERT INTO cotizaciones 
         (numero, cliente_id, usuario_id, subtotal, iva, descuento_porcentaje, 
          descuento_monto, total, notas, validez_dias, fecha_validez) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -169,7 +201,7 @@ class CotizacionController {
          fechaValidez.toISOString().split('T')[0]]);
       saveDb();
 
-      const cotizacionResult = db.exec(`SELECT id FROM cotizaciones WHERE numero = '${numero}'`);
+      const cotizacionResult = await db.exec(`SELECT id FROM cotizaciones WHERE numero = '${numero}'`);
       const cotizacionId = cotizacionResult[0].values[0][0];
 
       // Insertar items
@@ -178,13 +210,16 @@ class CotizacionController {
         VALUES (?, ?, ?, ?, ?)
       `);
 
-      for (const item of items) {
-        const prodResult = db.exec(`SELECT precio_unitario FROM productos WHERE id = ${item.producto_id}`);
-        const precioUnitario = item.precio_unitario || (prodResult.length > 0 ? prodResult[0].values[0][0] : 0);
-        const itemSubtotal = item.cantidad * precioUnitario;
-        insertItem.run([cotizacionId, item.producto_id, item.cantidad, precioUnitario, itemSubtotal]);
+      for (const item of itemsValidados) {
+        await insertItem.run([cotizacionId, item.producto_id, item.cantidad, item.precio_unitario, item.subtotal]);
       }
       saveDb();
+      await audit(req, {
+        accion: 'crear',
+        entidad: 'cotizacion',
+        entidad_id: cotizacionId,
+        detalle: { numero, total }
+      });
 
       res.status(201).json({ id: cotizacionId, message: 'Cotización creada exitosamente' });
     } catch (error) {
@@ -202,9 +237,23 @@ class CotizacionController {
       }
 
       const db = await initDb();
-      db.run(`UPDATE cotizaciones SET estado = ?, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?`,
+      const currentResult = await db.exec(`SELECT estado FROM cotizaciones WHERE id = ${Number(req.params.id)}`);
+      if (currentResult.length === 0 || currentResult[0].values.length === 0) {
+        return res.status(404).json({ error: 'Cotizacion no encontrada' });
+      }
+      if (currentResult[0].values[0][0] === 'facturada') {
+        return res.status(400).json({ error: 'Una venta facturada no puede cambiar de estado' });
+      }
+
+      await db.run(`UPDATE cotizaciones SET estado = ?, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?`,
         [estado, req.params.id]);
       saveDb();
+      await audit(req, {
+        accion: 'cambiar_estado',
+        entidad: 'cotizacion',
+        entidad_id: Number(req.params.id),
+        detalle: { estado }
+      });
 
       res.json({ message: 'Estado actualizado', estado });
     } catch (error) {
@@ -216,10 +265,14 @@ class CotizacionController {
   async convertirVenta(req, res) {
     try {
       const db = await initDb();
-      const { id } = req.params;
+      const id = Number(req.params.id);
 
-      const cotResult = db.exec(`SELECT estado FROM cotizaciones WHERE id = ${id}`);
-      if (cotResult.length === 0) {
+      if (!Number.isInteger(id)) {
+        return res.status(400).json({ error: 'ID de cotizacion invalido' });
+      }
+
+      const cotResult = await db.exec(`SELECT estado FROM cotizaciones WHERE id = ${id}`);
+      if (cotResult.length === 0 || cotResult[0].values.length === 0) {
         return res.status(404).json({ error: 'Cotización no encontrada' });
       }
 
@@ -228,30 +281,58 @@ class CotizacionController {
         return res.status(400).json({ error: 'La cotización ya fue facturada previamente' });
       }
 
-      // Restar el stock en SQLite
-      const itemsResult = db.exec(`SELECT producto_id, cantidad FROM cotizacion_items WHERE cotizacion_id = ${id}`);
-      if (itemsResult.length > 0) {
-        const items = itemsResult[0].values;
-        for (const item of items) {
-          db.run(`UPDATE productos SET stock_actual = stock_actual - ? WHERE id = ?`, [item[1], item[0]]);
+      if (estadoVirtual !== 'aceptada') {
+        return res.status(400).json({ error: 'Solo una cotizacion aceptada puede convertirse en venta' });
+      }
+
+      const itemsResult = await db.exec(`
+        SELECT ci.producto_id, ci.cantidad, p.nombre, p.stock_actual
+        FROM cotizacion_items ci
+        JOIN productos p ON p.id = ci.producto_id
+        WHERE ci.cotizacion_id = ${id}
+      `);
+
+      if (itemsResult.length === 0 || itemsResult[0].values.length === 0) {
+        return res.status(400).json({ error: 'La cotizacion no tiene productos para facturar' });
+      }
+
+      const items = itemsResult[0].values;
+      for (const item of items) {
+        const cantidad = Number(item[1]);
+        const stockActual = Number(item[3]);
+
+        if (cantidad > stockActual) {
+          return res.status(400).json({
+            error: `Stock insuficiente para ${item[2]}. Disponible: ${stockActual}, requerido: ${cantidad}`
+          });
         }
+      }
+
+      for (const item of items) {
+        await db.run(`UPDATE productos SET stock_actual = stock_actual - ? WHERE id = ?`, [item[1], item[0]]);
       }
 
       // Generar número factura
       const fecha = new Date();
       const year = fecha.getFullYear();
       const month = String(fecha.getMonth() + 1).padStart(2, '0');
-      const countResult = db.exec(`SELECT COUNT(factura_numero) FROM cotizaciones WHERE strftime('%Y', factura_fecha) = '${year}'`);
+      const countResult = await db.exec(`SELECT COUNT(factura_numero) FROM cotizaciones WHERE strftime('%Y', factura_fecha) = '${year}'`);
       const count = countResult.length > 0 ? countResult[0].values[0][0] : 0;
       const facturaNumero = `FAC-${year}${month}-${String(count + 1).padStart(4, '0')}`;
       const facturaFecha = fecha.toISOString();
 
       // Marcarla como facturada
-      db.run(`UPDATE cotizaciones SET estado = 'facturada', actualizado_en = CURRENT_TIMESTAMP, factura_numero = ?, factura_fecha = ? WHERE id = ?`, 
+      await db.run(`UPDATE cotizaciones SET estado = 'facturada', actualizado_en = CURRENT_TIMESTAMP, factura_numero = ?, factura_fecha = ? WHERE id = ?`, 
         [facturaNumero, facturaFecha, id]);
       saveDb();
+      await audit(req, {
+        accion: 'facturar',
+        entidad: 'cotizacion',
+        entidad_id: id,
+        detalle: { factura_numero: facturaNumero }
+      });
 
-      res.json({ message: 'Convertida a venta exitosamente. Stock descontado.' });
+      res.json({ message: 'Convertida a venta exitosamente. Stock descontado.', factura_numero: facturaNumero });
     } catch (error) {
       console.error('Error al facturar la venta:', error);
       res.status(500).json({ error: 'Error interno del servidor al facturar' });
@@ -261,7 +342,7 @@ class CotizacionController {
   async enviarEmail(req, res) {
     try {
       const db = await initDb();
-      const result = db.exec(`
+      const result = await db.exec(`
         SELECT cl.email, c.numero 
         FROM cotizaciones c 
         JOIN clientes cl ON c.cliente_id = cl.id 
@@ -286,7 +367,7 @@ class CotizacionController {
         const pdfData = Buffer.concat(buffers);
         try {
           await enviarCotizacionEmail(emailCliente, pdfData, numeroCoti);
-          db.run(`UPDATE cotizaciones SET enviado_email = 1 WHERE id = ${req.params.id}`);
+          await db.run(`UPDATE cotizaciones SET enviado_email = 1 WHERE id = ${req.params.id}`);
           saveDb();
           res.json({ message: 'Email enviado correctamente' });
         } catch (emailError) {
@@ -320,8 +401,18 @@ class CotizacionController {
   async delete(req, res) {
     try {
       const db = await initDb();
-      db.run(`DELETE FROM cotizaciones WHERE id = ?`, [req.params.id]);
+      const currentResult = await db.exec(`SELECT estado FROM cotizaciones WHERE id = ${Number(req.params.id)}`);
+      if (currentResult.length > 0 && currentResult[0].values.length > 0 && currentResult[0].values[0][0] === 'facturada') {
+        return res.status(400).json({ error: 'Una venta facturada no puede eliminarse' });
+      }
+
+      await db.run(`DELETE FROM cotizaciones WHERE id = ?`, [req.params.id]);
       saveDb();
+      await audit(req, {
+        accion: 'eliminar',
+        entidad: 'cotizacion',
+        entidad_id: Number(req.params.id)
+      });
       res.json({ message: 'Cotización eliminada correctamente' });
     } catch (error) {
       console.error('Error al eliminar cotización:', error);
@@ -333,10 +424,10 @@ class CotizacionController {
     try {
       const db = await initDb();
       
-      const totalResult = db.exec(`SELECT COUNT(*) FROM cotizaciones`);
-      const pendientesResult = db.exec(`SELECT COUNT(*) FROM cotizaciones WHERE estado = 'pendiente'`);
-      const aceptadasResult = db.exec(`SELECT COUNT(*) FROM cotizaciones WHERE estado = 'aceptada'`);
-      const valorTotalResult = db.exec(`SELECT COALESCE(SUM(total), 0) FROM cotizaciones`);
+      const totalResult = await db.exec(`SELECT COUNT(*) FROM cotizaciones`);
+      const pendientesResult = await db.exec(`SELECT COUNT(*) FROM cotizaciones WHERE estado = 'pendiente'`);
+      const aceptadasResult = await db.exec(`SELECT COUNT(*) FROM cotizaciones WHERE estado = 'aceptada'`);
+      const valorTotalResult = await db.exec(`SELECT COALESCE(SUM(total), 0) FROM cotizaciones`);
 
       const total = totalResult.length > 0 ? totalResult[0].values[0][0] : 0;
       const pendientes = pendientesResult.length > 0 ? pendientesResult[0].values[0][0] : 0;
@@ -344,7 +435,7 @@ class CotizacionController {
       const valorTotal = valorTotalResult.length > 0 && valorTotalResult[0].values[0][0] !== null ? valorTotalResult[0].values[0][0] : 0;
 
       // Obtener ventas por día (últimos 7 días para la gráfica)
-      const ventasDiaResult = db.exec(`
+      const ventasDiaResult = await db.exec(`
         SELECT DATE(creado_en) as fecha, SUM(total) as total 
         FROM cotizaciones 
         WHERE estado = 'facturada' AND creado_en >= date('now', '-7 days') 
@@ -360,7 +451,7 @@ class CotizacionController {
       }
 
       // Obtener top productos más vendidos
-      const topProdResult = db.exec(`
+      const topProdResult = await db.exec(`
         SELECT p.nombre, sum(ci.cantidad) as cantidad_vendida
         FROM cotizacion_items ci
         JOIN cotizaciones c ON c.id = ci.cotizacion_id
@@ -378,13 +469,34 @@ class CotizacionController {
         });
       }
 
+      // Obtener productos con bajo stock (umbral < 10)
+      const bajoStockCountResult = await db.exec(`SELECT COUNT(*) FROM productos WHERE stock_actual < 10`);
+      const productosBajoStockCount = bajoStockCountResult.length > 0 ? bajoStockCountResult[0].values[0][0] : 0;
+
+      const bajoStockListResult = await db.exec(`
+        SELECT id, nombre, stock_actual, unidad_medida 
+        FROM productos 
+        WHERE stock_actual < 10 
+        ORDER BY stock_actual ASC 
+        LIMIT 5
+      `);
+      
+      const bajoStockLista = [];
+      if (bajoStockListResult.length > 0) {
+        bajoStockListResult[0].values.forEach(row => {
+          bajoStockLista.push({ id: row[0], nombre: row[1], stock: row[2], unidad: row[3] });
+        });
+      }
+
       res.json({
         total,
         pendientes,
         aceptadas,
         valor_total: valorTotal,
         ventasPorDia,
-        topProductos
+        topProductos,
+        bajoStockCount: productosBajoStockCount,
+        bajoStockLista
       });
     } catch (error) {
       console.error('Error al obtener estadísticas:', error);

@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getCotizaciones, deleteCotizacion, enviarEmail, descargarPDF } from '../services/api';
+import * as XLSX from 'xlsx';
+import { formatCurrency } from '../utils/formatters';
 
 const CotizacionesList = () => {
   const [cotizaciones, setCotizaciones] = useState([]);
@@ -58,12 +60,37 @@ const CotizacionesList = () => {
     }
   };
 
+  const handleExportExcel = () => {
+    if (cotizaciones.length === 0) {
+      alert('No hay datos para exportar');
+      return;
+    }
+
+    const dataToExport = cotizaciones.map(cot => ({
+      'Número': cot.numero,
+      'Cliente': cot.cliente_nombre,
+      'Empresa': cot.cliente_empresa || '-',
+      'Subtotal': cot.subtotal,
+      'Descuento %': cot.descuento_porcentaje,
+      'IVA': cot.iva,
+      'Total': cot.total,
+      'Estado': cot.estado.toUpperCase(),
+      'Fecha': new Date(cot.creado_en).toLocaleDateString('es-MX')
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(dataToExport);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Cotizaciones');
+    XLSX.writeFile(wb, `Reporte_Cotizaciones_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
   const getEstadoBadge = (estado) => {
     const colors = {
       pendiente: 'bg-yellow-100 text-yellow-800',
       aceptada: 'bg-green-100 text-green-800',
       rechazada: 'bg-red-100 text-red-800',
-      anulada: 'bg-gray-100 text-gray-800'
+      anulada: 'bg-gray-100 text-gray-800',
+      facturada: 'bg-purple-100 text-purple-800'
     };
     return (
       <span className={`px-3 py-1 rounded-full text-xs font-semibold ${colors[estado] || 'bg-gray-100'}`}>
@@ -79,12 +106,20 @@ const CotizacionesList = () => {
           <h1 className="text-3xl font-bold text-gray-800">Cotizaciones</h1>
           <p className="text-gray-600 mt-1">Gestiona todas las cotizaciones</p>
         </div>
-        <Link
-          to="/cotizaciones/nueva"
-          className="bg-blue-900 text-white px-6 py-3 rounded-lg hover:bg-blue-800 transition font-medium"
-        >
-          ➕ Nueva Cotización
-        </Link>
+        <div className="flex space-x-3">
+          <button
+            onClick={handleExportExcel}
+            className="bg-green-700 text-white px-6 py-3 rounded-lg hover:bg-green-800 transition font-medium flex items-center"
+          >
+            <span className="mr-2">📊</span> Exportar a Excel
+          </button>
+          <Link
+            to="/cotizaciones/nueva"
+            className="bg-blue-900 text-white px-6 py-3 rounded-lg hover:bg-blue-800 transition font-medium"
+          >
+            ➕ Nueva Cotización
+          </Link>
+        </div>
       </div>
 
       {/* Filters */}
@@ -107,6 +142,7 @@ const CotizacionesList = () => {
             <option value="aceptada">Aceptada</option>
             <option value="rechazada">Rechazada</option>
             <option value="anulada">Anulada</option>
+            <option value="facturada">Facturada</option>
           </select>
         </div>
       </div>
@@ -139,11 +175,11 @@ const CotizacionesList = () => {
                       </Link>
                     </td>
                     <td className="py-3 px-4 text-sm">{cot.cliente_nombre}</td>
-                    <td className="py-3 px-4 text-sm">${cot.subtotal.toFixed(2)}</td>
+                    <td className="py-3 px-4 text-sm font-medium">{formatCurrency(cot.subtotal)}</td>
                     <td className="py-3 px-4 text-sm">
                       {cot.descuento_porcentaje > 0 ? `${cot.descuento_porcentaje}%` : '-'}
                     </td>
-                    <td className="py-3 px-4 text-sm font-semibold">${cot.total.toFixed(2)}</td>
+                    <td className="py-3 px-4 text-sm font-bold text-blue-900">{formatCurrency(cot.total)}</td>
                     <td className="py-3 px-4">{getEstadoBadge(cot.estado)}</td>
                     <td className="py-3 px-4 text-sm text-gray-600">
                       {new Date(cot.creado_en).toLocaleDateString('es-MX')}

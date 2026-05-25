@@ -1,10 +1,11 @@
 const { initDb, saveDb } = require('../config/database');
+const { audit } = require('../utils/auditLogger');
 
 class ConfiguracionController {
   async getAll(req, res) {
     try {
       const db = await initDb();
-      const configResult = db.exec(`SELECT clave, valor FROM configuracion`);
+      const configResult = await db.exec(`SELECT clave, valor FROM configuracion`);
       const config = {};
       
       if (configResult.length > 0) {
@@ -28,14 +29,19 @@ class ConfiguracionController {
         if (valor === undefined || valor === null) continue;
         
         // Verificamos si existe la clave en la tabla
-        const existe = db.exec(`SELECT id FROM configuracion WHERE clave = '${clave}'`);
+        const existe = await db.exec(`SELECT id FROM configuracion WHERE clave = '${clave}'`);
         if (existe.length > 0) {
-          db.run(`UPDATE configuracion SET valor = ? WHERE clave = ?`, [valor, clave]);
+          await db.run(`UPDATE configuracion SET valor = ? WHERE clave = ?`, [valor, clave]);
         } else {
-          db.run(`INSERT INTO configuracion (clave, valor) VALUES (?, ?)`, [clave, valor]);
+          await db.run(`INSERT INTO configuracion (clave, valor) VALUES (?, ?)`, [clave, valor]);
         }
       }
       saveDb();
+      await audit(req, {
+        accion: 'actualizar',
+        entidad: 'configuracion',
+        detalle: { claves: Object.keys(data) }
+      });
 
       res.json({ message: 'Configuración actualizada exitosamente' });
     } catch (error) {

@@ -17,7 +17,7 @@ class ClienteController {
       }
       query += ` ORDER BY nombre ASC`;
 
-      const result = db.exec(query);
+      const result = await db.exec(query);
       const clientes = result.length > 0 ? result[0].values.map(row => ({
         id: row[0], nombre: row[1], empresa: row[2], rfc: row[3],
         email: row[4], telefono: row[5], direccion: row[6],
@@ -34,7 +34,7 @@ class ClienteController {
   async getById(req, res) {
     try {
       const db = await initDb();
-      const result = db.exec(`SELECT id, nombre, empresa, rfc, email, telefono, direccion, tipo, creado_en FROM clientes WHERE id = ${req.params.id}`);
+      const result = await db.exec(`SELECT id, nombre, empresa, rfc, email, telefono, direccion, tipo, creado_en FROM clientes WHERE id = ${req.params.id}`);
       
       if (result.length === 0 || result[0].values.length === 0) {
         return res.status(404).json({ error: 'Cliente no encontrado' });
@@ -60,11 +60,11 @@ class ClienteController {
       }
 
       const db = await initDb();
-      db.run(`INSERT INTO clientes (nombre, empresa, rfc, email, telefono, direccion, tipo) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      await db.run(`INSERT INTO clientes (nombre, empresa, rfc, email, telefono, direccion, tipo) VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [nombre, empresa || null, rfc || null, email || null, telefono || null, direccion || null, tipo || 'natural']);
       saveDb();
 
-      const result = db.exec(`SELECT last_insert_rowid()`);
+      const result = await db.exec(`SELECT last_insert_rowid()`);
       const id = result[0].values[0][0];
 
       res.status(201).json({ id, nombre, empresa, rfc, email, telefono, direccion, tipo: tipo || 'natural' });
@@ -79,7 +79,7 @@ class ClienteController {
       const { nombre, empresa, rfc, email, telefono, direccion, tipo } = req.body;
       const db = await initDb();
       
-      db.run(`UPDATE clientes SET nombre = ?, empresa = ?, rfc = ?, email = ?, telefono = ?, direccion = ?, tipo = ? WHERE id = ?`,
+      await db.run(`UPDATE clientes SET nombre = ?, empresa = ?, rfc = ?, email = ?, telefono = ?, direccion = ?, tipo = ? WHERE id = ?`,
         [nombre, empresa || null, rfc || null, email || null, telefono || null, direccion || null, tipo || 'natural', req.params.id]);
       saveDb();
 
@@ -93,7 +93,7 @@ class ClienteController {
   async delete(req, res) {
     try {
       const db = await initDb();
-      db.run(`DELETE FROM clientes WHERE id = ?`, [req.params.id]);
+      await db.run(`DELETE FROM clientes WHERE id = ?`, [req.params.id]);
       saveDb();
       res.json({ message: 'Cliente eliminado correctamente' });
     } catch (error) {

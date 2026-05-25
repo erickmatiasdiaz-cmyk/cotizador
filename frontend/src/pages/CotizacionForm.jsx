@@ -11,7 +11,7 @@ const CotizacionForm = () => {
   const [clienteSearch, setClienteSearch] = useState('');
   const [productoSearch, setProductoSearch] = useState('');
 
-  const { control, register, handleSubmit, watch, formState: { errors } } = useForm({
+  const { control, register, handleSubmit, watch, setValue, formState: { errors } } = useForm({
     defaultValues: {
       cliente_id: '',
       items: [{ producto_id: '', cantidad: 1, precio_unitario: 0 }],
@@ -58,13 +58,12 @@ const CotizacionForm = () => {
     }
   };
 
-  const handleProductoChange = (index, productoId) => {
-    const producto = productos.find(p => p.id === parseInt(productoId));
-    if (producto) {
-      const { setValue } = useForm();
-      // Actualizar precio automáticamente
-    }
-  };
+
+
+  const hasStockIssues = watch('items').some(item => {
+    const producto = productos.find(p => p.id === parseInt(item.producto_id));
+    return producto && parseFloat(item.cantidad || 0) > producto.stock_actual;
+  });
 
   return (
     <div>
@@ -138,7 +137,7 @@ const CotizacionForm = () => {
                         field.onChange(e);
                         const producto = productos.find(p => p.id === parseInt(e.target.value));
                         if (producto) {
-                          // Actualizar precio
+                          setValue(`items.${index}.precio_unitario`, producto.precio_unitario);
                         }
                       }}
                     >
@@ -242,7 +241,7 @@ const CotizacionForm = () => {
           </button>
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || hasStockIssues}
             className="bg-blue-900 text-white px-6 py-3 rounded-lg hover:bg-blue-800 transition disabled:opacity-50"
           >
             {loading ? 'Creando...' : 'Crear Cotización'}

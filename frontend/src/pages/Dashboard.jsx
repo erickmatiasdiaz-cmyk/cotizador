@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getCotizacionesEstadisticas, getCotizaciones } from '../services/api';
+import { formatCurrency } from '../utils/formatters';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
@@ -51,10 +52,17 @@ const Dashboard = () => {
     },
     {
       title: 'Valor Total',
-      value: `$${(stats?.valor_total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`,
+      value: formatCurrency(stats?.valor_total || 0),
       icon: '💰',
       color: 'bg-purple-500',
       textColor: 'text-purple-600'
+    },
+    {
+      title: 'Stock en Alerta',
+      value: stats?.bajoStockCount || 0,
+      icon: '⚠️',
+      color: stats?.bajoStockCount > 0 ? 'bg-red-500' : 'bg-gray-400',
+      textColor: stats?.bajoStockCount > 0 ? 'text-red-600' : 'text-gray-600'
     }
   ];
 
@@ -161,46 +169,81 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Recent Cotizaciones */}
-      <div className="bg-white rounded-xl shadow-md p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold text-gray-800">Cotizaciones Recientes</h2>
-          <Link to="/cotizaciones" className="text-blue-600 hover:text-blue-800 text-sm">
-            Ver todas →
-          </Link>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-200">
-                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Número</th>
-                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Cliente</th>
-                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Total</th>
-                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Estado</th>
-                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Fecha</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentCotizaciones.map((cot) => (
-                <tr key={cot.id} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="py-3 px-4 text-sm">
-                    <Link to={`/cotizaciones/${cot.id}`} className="text-blue-600 hover:text-blue-800">
-                      {cot.numero}
-                    </Link>
-                  </td>
-                  <td className="py-3 px-4 text-sm">{cot.cliente_nombre}</td>
-                  <td className="py-3 px-4 text-sm font-semibold">${cot.total.toFixed(2)}</td>
-                  <td className="py-3 px-4">{getEstadoBadge(cot.estado)}</td>
-                  <td className="py-3 px-4 text-sm text-gray-600">
-                    {new Date(cot.creado_en).toLocaleDateString('es-MX')}
-                  </td>
+      {/* Recent Cotizaciones & Low Stock Alerts */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        {/* Recent Cotizaciones */}
+        <div className="bg-white rounded-xl shadow-md p-6 xl:col-span-2">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-bold text-gray-800">Cotizaciones Recientes</h2>
+            <Link to="/cotizaciones" className="text-blue-600 hover:text-blue-800 text-sm">
+              Ver todas →
+            </Link>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-gray-200">
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Número</th>
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Cliente</th>
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Total</th>
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Estado</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {recentCotizaciones.length === 0 && (
-            <p className="text-center text-gray-500 py-8">No hay cotizaciones aún</p>
-          )}
+              </thead>
+              <tbody>
+                {recentCotizaciones.map((cot) => (
+                  <tr key={cot.id} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="py-3 px-4 text-sm">
+                      <Link to={`/cotizaciones/${cot.id}`} className="text-blue-600 hover:text-blue-800">
+                        {cot.numero}
+                      </Link>
+                    </td>
+                    <td className="py-3 px-4 text-sm">{cot.cliente_nombre}</td>
+                    <td className="py-3 px-4 text-sm font-semibold text-blue-900">{formatCurrency(cot.total)}</td>
+                    <td className="py-3 px-4">{getEstadoBadge(cot.estado)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {recentCotizaciones.length === 0 && (
+              <p className="text-center text-gray-500 py-8">No hay cotizaciones aún</p>
+            )}
+          </div>
+        </div>
+
+        {/* Low Stock Alerts */}
+        <div className="bg-white rounded-xl shadow-md p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-bold text-gray-800">Alertas de Stock</h2>
+            <Link to="/productos" className="text-blue-600 hover:text-blue-800 text-sm">
+              Gestionar →
+            </Link>
+          </div>
+          <div className="space-y-4">
+            {stats?.bajoStockLista && stats.bajoStockLista.length > 0 ? (
+              stats.bajoStockLista.map((prod) => (
+                <div key={prod.id} className="flex items-center justify-between p-3 bg-red-50 rounded-lg border border-red-100">
+                  <div className="flex flex-col">
+                    <span className="text-sm font-bold text-gray-800">{prod.nombre}</span>
+                    <span className="text-xs text-gray-500">{prod.unidad}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-lg font-bold text-red-600">{prod.stock}</span>
+                    <p className="text-[10px] text-red-400 uppercase font-bold">Quedan</p>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="text-center py-10">
+                <div className="text-3xl mb-2">✅</div>
+                <p className="text-gray-500 text-sm">Todo el stock está en niveles óptimos</p>
+              </div>
+            )}
+            {stats?.bajoStockCount > 5 && (
+              <p className="text-xs text-center text-gray-400 mt-2">
+                Y {stats.bajoStockCount - 5} productos más en alerta...
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </div>

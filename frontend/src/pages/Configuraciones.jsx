@@ -143,6 +143,7 @@ const Configuraciones = () => {
                     <input type="file" className="sr-only" accept="image/*" onChange={handleFileChange} />
                   </label>
                   <p className="text-xs text-gray-500 mt-2">Formatos recomendados: PNG, JPG, JPEG (Max 2MB para evitar PDFs muy pesados).</p>
+                  <p className="text-xs text-blue-600 mt-1">El catalogo, la presentacion y el panel tomaran automaticamente sus colores principales desde este logo.</p>
                 </div>
               </div>
             </div>

@@ -1,4 +1,5 @@
 const { initDb, saveDb } = require('../config/database');
+const { audit } = require('../utils/auditLogger');
 
 class ProductoController {
   async getAll(req, res) {
@@ -22,7 +23,7 @@ class ProductoController {
       }
       query += ` ORDER BY p.nombre ASC`;
 
-      const result = db.exec(query);
+      const result = await db.exec(query);
       const productos = result.length > 0 ? result[0].values.map(row => ({
         id: row[0], nombre: row[1], descripcion: row[2], categoria_id: row[3],
         categoria: row[4], precio_unitario: row[5], stock_actual: row[6],
@@ -46,7 +47,7 @@ class ProductoController {
         LEFT JOIN categorias c ON p.categoria_id = c.id
         WHERE p.id = ${req.params.id}
       `;
-      const result = db.exec(query);
+      const result = await db.exec(query);
       
       if (result.length === 0 || result[0].values.length === 0) {
         return res.status(404).json({ error: 'Producto no encontrado' });
@@ -72,12 +73,18 @@ class ProductoController {
       }
 
       const db = await initDb();
-      db.run(`INSERT INTO productos (nombre, descripcion, categoria_id, precio_unitario, stock_actual, unidad_medida, imagen_url) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      await db.run(`INSERT INTO productos (nombre, descripcion, categoria_id, precio_unitario, stock_actual, unidad_medida, imagen_url) VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [nombre, descripcion || null, categoria_id || null, precio_unitario, stock_actual || 0, unidad_medida || 'unidad', imagen_url || null]);
       saveDb();
 
-      const result = db.exec(`SELECT last_insert_rowid()`);
+      const result = await db.exec(`SELECT last_insert_rowid()`);
       const id = result[0].values[0][0];
+      await audit(req, {
+        accion: 'crear',
+        entidad: 'producto',
+        entidad_id: id,
+        detalle: { nombre, precio_unitario, stock_actual: stock_actual || 0 }
+      });
 
       res.status(201).json({
         id, nombre, descripcion, categoria_id,
@@ -94,9 +101,15 @@ class ProductoController {
       const { nombre, descripcion, categoria_id, precio_unitario, stock_actual, unidad_medida, imagen_url } = req.body;
       const db = await initDb();
       
-      db.run(`UPDATE productos SET nombre = ?, descripcion = ?, categoria_id = ?, precio_unitario = ?, stock_actual = ?, unidad_medida = ?, imagen_url = ? WHERE id = ?`,
+      await db.run(`UPDATE productos SET nombre = ?, descripcion = ?, categoria_id = ?, precio_unitario = ?, stock_actual = ?, unidad_medida = ?, imagen_url = ? WHERE id = ?`,
         [nombre, descripcion || null, categoria_id || null, precio_unitario, stock_actual || 0, unidad_medida || 'unidad', imagen_url || null, req.params.id]);
       saveDb();
+      await audit(req, {
+        accion: 'actualizar',
+        entidad: 'producto',
+        entidad_id: Number(req.params.id),
+        detalle: { nombre, precio_unitario, stock_actual }
+      });
 
       res.json({
         id: parseInt(req.params.id), nombre, descripcion, categoria_id,
@@ -111,8 +124,13 @@ class ProductoController {
   async delete(req, res) {
     try {
       const db = await initDb();
-      db.run(`DELETE FROM productos WHERE id = ?`, [req.params.id]);
+      await db.run(`DELETE FROM productos WHERE id = ?`, [req.params.id]);
       saveDb();
+      await audit(req, {
+        accion: 'eliminar',
+        entidad: 'producto',
+        entidad_id: Number(req.params.id)
+      });
       res.json({ message: 'Producto eliminado correctamente' });
     } catch (error) {
       console.error('Error al eliminar producto:', error);
@@ -130,7 +148,7 @@ class ProductoController {
         GROUP BY c.id
         ORDER BY c.nombre ASC
       `;
-      const result = db.exec(query);
+      const result = await db.exec(query);
       const categorias = result.length > 0 ? result[0].values.map(row => ({
         id: row[0], nombre: row[1], descripcion: row[2], total_productos: row[3]
       })) : [];
@@ -162,23 +180,28 @@ class ProductoController {
         if (!nombre || !precio_unitario) continue;
 
         // Comprobar si existe
-        const existsResult = db.exec(`SELECT id, stock_actual FROM productos WHERE nombre = '${nombre.replace(/'/g, "''")}'`);
+        const existsResult = await db.exec(`SELECT id, stock_actual FROM productos WHERE nombre = '${nombre.replace(/'/g, "''")}'`);
         
         if (existsResult.length > 0 && existsResult[0].values.length > 0) {
           // Existe: actualizar
           const existingId = existsResult[0].values[0][0];
-          db.run(`UPDATE productos SET precio_unitario = ?, stock_actual = stock_actual + ?, descripcion = ? WHERE id = ?`,
+          await db.run(`UPDATE productos SET precio_unitario = ?, stock_actual = stock_actual + ?, descripcion = ? WHERE id = ?`,
             [precio_unitario, stock_actual, descripcion, existingId]);
           actualizados++;
         } else {
           // No existe: crear
-          db.run(`INSERT INTO productos (nombre, descripcion, precio_unitario, stock_actual, unidad_medida) VALUES (?, ?, ?, ?, ?)`,
+          await db.run(`INSERT INTO productos (nombre, descripcion, precio_unitario, stock_actual, unidad_medida) VALUES (?, ?, ?, ?, ?)`,
             [nombre, descripcion, precio_unitario, stock_actual, 'unidad']);
           agregados++;
         }
       }
 
       saveDb();
+      await audit(req, {
+        accion: 'importar',
+        entidad: 'producto',
+        detalle: { agregados, actualizados }
+      });
       res.json({ message: 'Importación finalizada', agregados, actualizados });
     } catch (error) {
       console.error('Error al importar productos:', error);

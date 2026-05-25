@@ -6,23 +6,24 @@ async function generarPDFCotizacion(cotizacionId, res) {
   
   const query = `
     SELECT 
-      c.id, c.numero, c.cliente_id, cl.nombre as cliente_nombre, 
+      c.id, c.numero, c.cliente_id, COALESCE(cl.nombre, '(Cliente eliminado)') as cliente_nombre, 
       cl.empresa as cliente_empresa, cl.rfc as cliente_rfc,
       cl.email as cliente_email, cl.telefono as cliente_telefono,
       cl.direccion as cliente_direccion,
-      c.usuario_id, u.nombre as usuario_nombre,
+      c.usuario_id, COALESCE(u.nombre, '(Usuario eliminado)') as usuario_nombre,
       c.subtotal, c.iva, c.descuento_porcentaje, c.descuento_monto, c.total,
       c.notas, c.validez_dias, c.fecha_validez, c.estado,
       c.creado_en
     FROM cotizaciones c
-    INNER JOIN clientes cl ON c.cliente_id = cl.id
-    INNER JOIN usuarios u ON c.usuario_id = u.id
-    WHERE c.id = ${cotizacionId}
+    LEFT JOIN clientes cl ON c.cliente_id = cl.id
+    LEFT JOIN usuarios u ON c.usuario_id = u.id
+    WHERE c.id = ${Number(cotizacionId)}
   `;
   
-  const result = db.exec(query);
+  const result = await db.exec(query);
   if (result.length === 0 || result[0].values.length === 0) {
-    return res.status(404).json({ error: 'Cotización no encontrada' });
+    if (res) return res.status(404).json({ error: 'Cotizacion no encontrada' });
+    throw new Error('Cotizacion no encontrada');
   }
 
   const row = result[0].values[0];
@@ -37,7 +38,7 @@ async function generarPDFCotizacion(cotizacionId, res) {
     estado: row[19], creado_en: row[20]
   };
 
-  const itemsResult = db.exec(`
+  const itemsResult = await db.exec(`
     SELECT ci.id, ci.producto_id, p.nombre as producto_nombre,
            p.descripcion as producto_descripcion,
            ci.cantidad, ci.precio_unitario, ci.subtotal
@@ -54,7 +55,7 @@ async function generarPDFCotizacion(cotizacionId, res) {
   })) : [];
 
   const config = {};
-  const configResult = db.exec(`SELECT clave, valor FROM configuracion`);
+  const configResult = await db.exec(`SELECT clave, valor FROM configuracion`);
   if (configResult.length > 0) {
     configResult[0].values.forEach(row => {
       config[row[0]] = row[1];
@@ -109,7 +110,7 @@ async function generarPDFCotizacion(cotizacionId, res) {
     doc.text(`No. ${cotizacion.numero}`, { align: 'right' });
     
     const fechaCreacion = new Date(cotizacion.creado_en);
-    doc.text(`Fecha: ${fechaCreacion.toLocaleDateString('es-MX')}`, { align: 'right' });
+    doc.text(`Fecha: ${fechaCreacion.toLocaleDateString('es-CL')}`, { align: 'right' });
     doc.text(`Vigencia: ${cotizacion.fecha_validez}`, { align: 'right' });
     
     const estadoColor = cotizacion.estado === 'aceptada' ? '#16a34a' : cotizacion.estado === 'rechazada' ? '#dc2626' : '#d97706';
@@ -150,11 +151,11 @@ async function generarPDFCotizacion(cotizacionId, res) {
     let currentX = startX;
     
     // Dibujar encabezados
-    doc.fillColor('#ffffff');
     doc.fontSize(9);
     
     const headers = ['Cantidad', 'Producto', 'P. Unitario', 'Subtotal', 'Total'];
     colWidths.forEach((width, i) => {
+      doc.fillColor(colorPrimario);
       doc.rect(currentX, tableTop, width, tableHeight).fill();
       doc.fillColor('#ffffff');
       doc.text(headers[i], currentX + 5, tableTop + 4, { width: width - 10 });
@@ -187,13 +188,13 @@ async function generarPDFCotizacion(cotizacionId, res) {
       doc.text(item.producto_nombre, currentX + 5, currentY + 4, { width: colWidths[1] - 10, ellipsis: true });
       currentX += colWidths[1];
       
-      doc.text(`$${item.precio_unitario.toFixed(2)}`, currentX + 5, currentY + 4, { width: colWidths[2] - 10, align: 'right' });
+      doc.text(`$ ${Math.round(item.precio_unitario).toLocaleString('es-CL')}`, currentX + 5, currentY + 4, { width: colWidths[2] - 10, align: 'right' });
       currentX += colWidths[2];
       
-      doc.text(`$${item.subtotal.toFixed(2)}`, currentX + 5, currentY + 4, { width: colWidths[3] - 10, align: 'right' });
+      doc.text(`$ ${Math.round(item.subtotal).toLocaleString('es-CL')}`, currentX + 5, currentY + 4, { width: colWidths[3] - 10, align: 'right' });
       currentX += colWidths[3];
       
-      doc.text(`$${item.subtotal.toFixed(2)}`, currentX + 5, currentY + 4, { width: colWidths[4] - 10, align: 'right' });
+      doc.text(`$ ${Math.round(item.subtotal).toLocaleString('es-CL')}`, currentX + 5, currentY + 4, { width: colWidths[4] - 10, align: 'right' });
 
       currentY += rowHeight;
 
@@ -218,25 +219,25 @@ async function generarPDFCotizacion(cotizacionId, res) {
     doc.fillColor('#000');
     doc.fontSize(9);
     doc.text('Subtotal:', totalsX, totalsY, { width: 80, align: 'right' });
-    doc.text(`$${cotizacion.subtotal.toFixed(2)}`, totalsX + 85, totalsY);
+    doc.text(`$ ${Math.round(cotizacion.subtotal).toLocaleString('es-CL')}`, totalsX + 85, totalsY);
     totalsY += 18;
 
     if (cotizacion.descuento_porcentaje > 0) {
       doc.text(`Descuento (${cotizacion.descuento_porcentaje}%):`, totalsX, totalsY, { width: 80, align: 'right' });
-      doc.text(`-$${cotizacion.descuento_monto.toFixed(2)}`, totalsX + 85, totalsY);
+      doc.text(`-$ ${Math.round(cotizacion.descuento_monto).toLocaleString('es-CL')}`, totalsX + 85, totalsY);
       totalsY += 18;
     }
 
     const ivaPorcentaje = config.IVA_PORCENTAJE || '16';
     doc.text(`IVA (${ivaPorcentaje}%):`, totalsX, totalsY, { width: 80, align: 'right' });
-    doc.text(`$${cotizacion.iva.toFixed(2)}`, totalsX + 85, totalsY);
+    doc.text(`$ ${Math.round(cotizacion.iva).toLocaleString('es-CL')}`, totalsX + 85, totalsY);
     totalsY += 22;
 
     // Total
     doc.fillColor(colorPrimario);
     doc.fontSize(13);
     doc.text('TOTAL:', totalsX, totalsY, { width: 80, align: 'right' });
-    doc.text(`$${cotizacion.total.toFixed(2)} ${config.MONEDA || 'MXN'}`, totalsX + 85, totalsY);
+    doc.text(`$ ${Math.round(cotizacion.total).toLocaleString('es-CL')} ${config.MONEDA || 'CLP'}`, totalsX + 85, totalsY);
 
     doc.moveDown(2);
 
@@ -266,7 +267,10 @@ async function generarPDFCotizacion(cotizacionId, res) {
     doc.end();
   } catch (error) {
     console.error('Error al generar PDF:', error);
-    res.status(500).json({ error: 'Error al generar PDF: ' + error.message });
+    if (res && !res.headersSent) {
+      return res.status(500).json({ error: 'Error al generar PDF: ' + error.message });
+    }
+    throw error;
   }
 }
 
@@ -275,23 +279,23 @@ async function generarPDFFactura(cotizacionId, res) {
   
   const query = `
     SELECT 
-      c.id, c.numero, c.cliente_id, cl.nombre as cliente_nombre, 
+      c.id, c.numero, c.cliente_id, COALESCE(cl.nombre, '(Cliente eliminado)') as cliente_nombre, 
       cl.empresa as cliente_empresa, cl.rfc as cliente_rfc,
       cl.email as cliente_email, cl.telefono as cliente_telefono,
       cl.direccion as cliente_direccion,
-      c.usuario_id, u.nombre as usuario_nombre,
+      c.usuario_id, COALESCE(u.nombre, '(Usuario eliminado)') as usuario_nombre,
       c.subtotal, c.iva, c.descuento_porcentaje, c.descuento_monto, c.total,
       c.notas, c.validez_dias, c.fecha_validez, c.estado,
       c.creado_en, c.factura_numero, c.factura_fecha
     FROM cotizaciones c
-    INNER JOIN clientes cl ON c.cliente_id = cl.id
-    INNER JOIN usuarios u ON c.usuario_id = u.id
-    WHERE c.id = ${cotizacionId}
+    LEFT JOIN clientes cl ON c.cliente_id = cl.id
+    LEFT JOIN usuarios u ON c.usuario_id = u.id
+    WHERE c.id = ${Number(cotizacionId)}
   `;
   
-  const result = db.exec(query);
+  const result = await db.exec(query);
   if (result.length === 0 || result[0].values.length === 0) {
-    if(res) return res.status(404).json({ error: 'Cotización no encontrada' });
+    if(res) return res.status(404).json({ error: 'Cotizacion no encontrada' });
     throw new Error('Cotizacion no encontrada');
   }
 
@@ -307,7 +311,7 @@ async function generarPDFFactura(cotizacionId, res) {
     estado: row[19], creado_en: row[20], factura_numero: row[21], factura_fecha: row[22]
   };
 
-  const itemsResult = db.exec(`
+  const itemsResult = await db.exec(`
     SELECT ci.id, ci.producto_id, p.nombre as producto_nombre,
            ci.cantidad, ci.precio_unitario, ci.subtotal
     FROM cotizacion_items ci
@@ -322,7 +326,7 @@ async function generarPDFFactura(cotizacionId, res) {
   })) : [];
 
   const config = {};
-  const configResult = db.exec(`SELECT clave, valor FROM configuracion`);
+  const configResult = await db.exec(`SELECT clave, valor FROM configuracion`);
   if (configResult.length > 0) configResult[0].values.forEach(row => { config[row[0]] = row[1]; });
 
   try {
@@ -382,9 +386,10 @@ async function generarPDFFactura(cotizacionId, res) {
     const colWidths = [60, 250, 70, 80, 100];
     let currentX = startX;
     
-    doc.fillColor('#ffffff').fontSize(9);
+    doc.fontSize(9);
     const headers = ['Cantidad', 'Producto', 'P. Unitario', 'Subtotal', 'Total'];
     colWidths.forEach((width, i) => {
+      doc.fillColor(colorPrimario);
       doc.rect(currentX, tableTop, width, 18).fill();
       doc.fillColor('#ffffff').text(headers[i], currentX + 5, tableTop + 4, { width: width - 10 });
       currentX += width;
@@ -400,9 +405,9 @@ async function generarPDFFactura(cotizacionId, res) {
       
       doc.text(item.cantidad.toString(), currentX + 5, currentY + 4, { width: colWidths[0] - 10 }); currentX += colWidths[0];
       doc.text(item.producto_nombre, currentX + 5, currentY + 4, { width: colWidths[1] - 10, ellipsis: true }); currentX += colWidths[1];
-      doc.text(`$${item.precio_unitario.toFixed(2)}`, currentX + 5, currentY + 4, { width: colWidths[2] - 10, align: 'right' }); currentX += colWidths[2];
-      doc.text(`$${item.subtotal.toFixed(2)}`, currentX + 5, currentY + 4, { width: colWidths[3] - 10, align: 'right' }); currentX += colWidths[3];
-      doc.text(`$${item.subtotal.toFixed(2)}`, currentX + 5, currentY + 4, { width: colWidths[4] - 10, align: 'right' });
+      doc.text(`$ ${Math.round(item.precio_unitario).toLocaleString('es-CL')}`, currentX + 5, currentY + 4, { width: colWidths[2] - 10, align: 'right' }); currentX += colWidths[2];
+      doc.text(`$ ${Math.round(item.subtotal).toLocaleString('es-CL')}`, currentX + 5, currentY + 4, { width: colWidths[3] - 10, align: 'right' }); currentX += colWidths[3];
+      doc.text(`$ ${Math.round(item.subtotal).toLocaleString('es-CL')}`, currentX + 5, currentY + 4, { width: colWidths[4] - 10, align: 'right' });
       currentY += 18;
       if (currentY > 680) { doc.addPage(); currentY = 50; }
     });
@@ -414,16 +419,16 @@ async function generarPDFFactura(cotizacionId, res) {
     const totalsX = 380;
     let totalsY = currentY + 15;
     doc.fillColor('#000').fontSize(9);
-    doc.text('Subtotal:', totalsX, totalsY, { width: 80, align: 'right' }).text(`$${cotizacion.subtotal.toFixed(2)}`, totalsX + 85, totalsY);
+    doc.text('Subtotal:', totalsX, totalsY, { width: 80, align: 'right' }).text(`$ ${Math.round(cotizacion.subtotal).toLocaleString('es-CL')}`, totalsX + 85, totalsY);
     totalsY += 18;
     if (cotizacion.descuento_porcentaje > 0) {
-      doc.text(`Descuento (${cotizacion.descuento_porcentaje}%):`, totalsX, totalsY, { width: 80, align: 'right' }).text(`-$${cotizacion.descuento_monto.toFixed(2)}`, totalsX + 85, totalsY);
+      doc.text(`Descuento (${cotizacion.descuento_porcentaje}%):`, totalsX, totalsY, { width: 80, align: 'right' }).text(`-$ ${Math.round(cotizacion.descuento_monto).toLocaleString('es-CL')}`, totalsX + 85, totalsY);
       totalsY += 18;
     }
-    doc.text(`IVA (${config.IVA_PORCENTAJE || '16'}%):`, totalsX, totalsY, { width: 80, align: 'right' }).text(`$${cotizacion.iva.toFixed(2)}`, totalsX + 85, totalsY);
+    doc.text(`IVA (${config.IVA_PORCENTAJE || '16'}%):`, totalsX, totalsY, { width: 80, align: 'right' }).text(`$ ${Math.round(cotizacion.iva).toLocaleString('es-CL')}`, totalsX + 85, totalsY);
     totalsY += 22;
     doc.fillColor(colorPrimario).fontSize(13);
-    doc.text('TOTAL DE VENTA:', totalsX, totalsY, { width: 80, align: 'right' }).text(`$${cotizacion.total.toFixed(2)} ${config.MONEDA || 'MXN'}`, totalsX + 85, totalsY);
+    doc.text('TOTAL DE VENTA:', totalsX, totalsY, { width: 80, align: 'right' }).text(`$ ${Math.round(cotizacion.total).toLocaleString('es-CL')} ${config.MONEDA || 'CLP'}`, totalsX + 85, totalsY);
 
     if (cotizacion.notas) {
       doc.moveDown(2).fillColor(colorPrimario).fontSize(11).text('NOTAS IMPORTANTES:').fillColor('#000').fontSize(9).text(cotizacion.notas, { width: 510 });
@@ -438,7 +443,10 @@ async function generarPDFFactura(cotizacionId, res) {
     if (!res) return doc;
     doc.end();
   } catch (error) {
-    if (res) res.status(500).json({ error: error.message });
+    if (res && !res.headersSent) {
+      return res.status(500).json({ error: error.message });
+    }
+    throw error;
   }
 }
 

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getCotizacion, updateCotizacionEstado, descargarPDF, descargarFactura, enviarEmail, convertirVenta } from '../services/api';
+import { formatCurrency } from '../utils/formatters';
 
 const CotizacionDetail = () => {
   const { id } = useParams();
@@ -20,6 +21,35 @@ const CotizacionDetail = () => {
       .finally(() => setLoading(false));
   };
 
+  const getBlobErrorMessage = async (error, fallback) => {
+    const data = error.response?.data;
+
+    if (data instanceof Blob) {
+      try {
+        const text = await data.text();
+        const parsed = JSON.parse(text);
+        return parsed.error || fallback;
+      } catch {
+        return fallback;
+      }
+    }
+
+    return error.response?.data?.error || fallback;
+  };
+
+  const downloadPdfBlob = (blobData, filename) => {
+    const blob = new Blob([blobData], { type: 'application/pdf' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
   const handleUpdateEstado = async (estado) => {
     if (!window.confirm(`¿Marcar cotización como ${estado}?`)) return;
     
@@ -35,30 +65,18 @@ const CotizacionDetail = () => {
   const handleDownloadPDF = async () => {
     try {
       const response = await descargarPDF(id);
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `${cotizacion.numero}.pdf`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      downloadPdfBlob(response.data, `${cotizacion.numero}.pdf`);
     } catch (error) {
-      alert('Error al descargar PDF');
+      alert(await getBlobErrorMessage(error, 'Error al descargar PDF'));
     }
   };
 
   const handleDownloadFactura = async () => {
     try {
       const response = await descargarFactura(id);
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `${cotizacion.factura_numero || 'factura'}.pdf`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      downloadPdfBlob(response.data, `${cotizacion.factura_numero || cotizacion.numero || 'factura'}.pdf`);
     } catch (error) {
-      alert('Error al descargar Factura');
+      alert(await getBlobErrorMessage(error, 'Error al descargar Factura'));
     }
   };
 
@@ -266,8 +284,8 @@ const CotizacionDetail = () => {
                 <tr key={item.id} className="border-b border-gray-100">
                   <td className="py-3 px-4">{item.producto_nombre}</td>
                   <td className="py-3 px-4 text-center">{item.cantidad}</td>
-                  <td className="py-3 px-4 text-right">${item.precio_unitario.toFixed(2)}</td>
-                  <td className="py-3 px-4 text-right font-semibold">${item.subtotal.toFixed(2)}</td>
+                  <td className="py-3 px-4 text-right">{formatCurrency(item.precio_unitario)}</td>
+                  <td className="py-3 px-4 text-right font-semibold text-blue-900">{formatCurrency(item.subtotal)}</td>
                 </tr>
               ))}
             </tbody>
@@ -281,7 +299,7 @@ const CotizacionDetail = () => {
           <div className="w-full md:w-1/2 lg:w-1/3">
             <div className="flex justify-between py-2 border-b border-gray-200">
               <span className="text-gray-600">Subtotal:</span>
-              <span className="font-medium">${cotizacion.subtotal.toFixed(2)}</span>
+              <span className="font-medium text-gray-800">{formatCurrency(cotizacion.subtotal)}</span>
             </div>
             {cotizacion.descuento_porcentaje > 0 && (
               <div className="flex justify-between py-2 border-b border-gray-200">
@@ -289,17 +307,17 @@ const CotizacionDetail = () => {
                   Descuento ({cotizacion.descuento_porcentaje}%):
                 </span>
                 <span className="font-medium text-red-600">
-                  -${cotizacion.descuento_monto.toFixed(2)}
+                  -{formatCurrency(cotizacion.descuento_monto)}
                 </span>
               </div>
             )}
             <div className="flex justify-between py-2 border-b border-gray-200">
               <span className="text-gray-600">IVA (16%):</span>
-              <span className="font-medium">${cotizacion.iva.toFixed(2)}</span>
+              <span className="font-medium text-gray-800">{formatCurrency(cotizacion.iva)}</span>
             </div>
             <div className="flex justify-between py-3 text-xl">
               <span className="font-bold text-blue-900">TOTAL:</span>
-              <span className="font-bold text-blue-900">${cotizacion.total.toFixed(2)}</span>
+              <span className="font-bold text-blue-900 text-xl">{formatCurrency(cotizacion.total)}</span>
             </div>
           </div>
         </div>
