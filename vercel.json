@@ -1,22 +1,12 @@
 {
-  "buildCommand": "npm run build",
-  "outputDirectory": "frontend/dist",
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
-  ],
   "experimentalServices": {
     "backend": {
-      "root": "backend",
-      "entrypoint": "src/app.js",
+      "entrypoint": "backend/src/app.js",
       "routePrefix": "/api"
     },
     "frontend": {
-      "root": "frontend",
-      "routePrefix": "/",
-      "framework": "vite"
+      "entrypoint": "frontend",
+      "routePrefix": "/"
     }
   }
 }
