@@ -121,7 +121,7 @@ const Login = () => {
                   onChange={(event) => setFormData({ ...formData, email: event.target.value })}
                 className="w-full rounded-2xl border border-stone-200 bg-white px-4 py-3 text-stone-900 outline-none transition focus:ring-4"
                 style={{ '--tw-ring-color': 'var(--brand-soft)' }}
-                  placeholder="admin@supermercado.com"
+                  placeholder="correo@empresa.com"
                   required
                 />
               </div>
@@ -148,11 +148,6 @@ const Login = () => {
                 {loading ? 'Entrando...' : 'Entrar al panel'}
               </button>
             </form>
-
-            <div className="mt-6 rounded-2xl bg-[#f7f0e7] p-4 text-sm text-stone-700">
-              <p className="font-black text-stone-900">Credenciales demo</p>
-              <p className="mt-1">admin@supermercado.com / admin123</p>
-            </div>
 
             <div className="mt-6 flex items-center justify-between text-sm font-bold">
               <Link to="/catalogo" style={{ color: 'var(--brand-primary)' }}>
