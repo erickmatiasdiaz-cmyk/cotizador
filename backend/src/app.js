@@ -37,8 +37,20 @@ app.use('/api/configuracion', configuracionRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/categorias', categoriasRoutes);
 
+// Alias para despliegues que enrutan el servicio backend directamente bajo /api.
+app.use('/auth', authRoutes);
+app.use('/clientes', clientesRoutes);
+app.use('/productos', productosRoutes);
+app.use('/cotizaciones', cotizacionesRoutes);
+app.use('/configuracion', configuracionRoutes);
+app.use('/public', publicRoutes);
+app.use('/categorias', categoriasRoutes);
+
 // Health check
 app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
