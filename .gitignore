@@ -7,3 +7,5 @@ backend/data/*.db
 backend/src/data/*.db
 test.pdf
 scratch/
+
+.vercel
