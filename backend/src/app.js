@@ -53,15 +53,6 @@ app.get('/api/health', (req, res) => {
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
-app.get(['/api/db-health', '/db-health'], async (req, res) => {
-  try {
-    const db = await initDb();
-    const result = await db.exec('SELECT COUNT(*) FROM categorias');
-    res.json({ status: 'ok', categorias: result[0].values[0][0] });
-  } catch (error) {
-    res.status(500).json({ status: 'error', message: error.message, code: error.code });
-  }
-});
 
 // Ruta por defecto
 app.get('/', (req, res) => {
