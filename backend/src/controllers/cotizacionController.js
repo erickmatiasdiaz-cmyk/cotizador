@@ -543,27 +543,40 @@ class CotizacionController {
     try {
       const db = await initDb();
       
-      const totalResult = await db.exec(`SELECT COUNT(*) FROM cotizaciones`);
-      const pendientesResult = await db.exec(`SELECT COUNT(*) FROM cotizaciones WHERE estado = 'pendiente'`);
-      const aceptadasResult = await db.exec(`SELECT COUNT(*) FROM cotizaciones WHERE estado = 'aceptada'`);
-      const valorTotalResult = await db.exec(`SELECT COALESCE(SUM(total), 0) FROM cotizaciones`);
-      const valorPendienteResult = await db.exec(`SELECT COALESCE(SUM(total), 0) FROM cotizaciones WHERE estado = 'pendiente'`);
-      const valorAceptadoResult = await db.exec(`SELECT COALESCE(SUM(total), 0) FROM cotizaciones WHERE estado IN ('aceptada', 'facturada')`);
-      const ticketPromedioResult = await db.exec(`SELECT COALESCE(AVG(total), 0) FROM cotizaciones`);
-      const productosResult = await db.exec(`SELECT COUNT(*) FROM productos`);
-      const unidadesStockResult = await db.exec(`SELECT COALESCE(SUM(stock_actual), 0) FROM productos`);
-      const valorInventarioResult = await db.exec(`SELECT COALESCE(SUM(precio_unitario * stock_actual), 0) FROM productos`);
+      const resumenCotizacionesResult = await db.exec(`
+        SELECT
+          COUNT(*) as total,
+          SUM(CASE WHEN estado = 'pendiente' THEN 1 ELSE 0 END) as pendientes,
+          SUM(CASE WHEN estado = 'aceptada' THEN 1 ELSE 0 END) as aceptadas,
+          COALESCE(SUM(total), 0) as valor_total,
+          COALESCE(SUM(CASE WHEN estado = 'pendiente' THEN total ELSE 0 END), 0) as valor_pendiente,
+          COALESCE(SUM(CASE WHEN estado IN ('aceptada', 'facturada') THEN total ELSE 0 END), 0) as valor_aceptado,
+          COALESCE(AVG(total), 0) as ticket_promedio
+        FROM cotizaciones
+      `);
 
-      const total = totalResult.length > 0 ? totalResult[0].values[0][0] : 0;
-      const pendientes = pendientesResult.length > 0 ? pendientesResult[0].values[0][0] : 0;
-      const aceptadas = aceptadasResult.length > 0 ? aceptadasResult[0].values[0][0] : 0;
-      const valorTotal = valorTotalResult.length > 0 && valorTotalResult[0].values[0][0] !== null ? valorTotalResult[0].values[0][0] : 0;
-      const valorPendiente = valorPendienteResult.length > 0 ? valorPendienteResult[0].values[0][0] : 0;
-      const valorAceptado = valorAceptadoResult.length > 0 ? valorAceptadoResult[0].values[0][0] : 0;
-      const ticketPromedio = ticketPromedioResult.length > 0 ? ticketPromedioResult[0].values[0][0] : 0;
-      const totalProductos = productosResult.length > 0 ? productosResult[0].values[0][0] : 0;
-      const unidadesStock = unidadesStockResult.length > 0 ? unidadesStockResult[0].values[0][0] : 0;
-      const valorInventario = valorInventarioResult.length > 0 ? valorInventarioResult[0].values[0][0] : 0;
+      const resumenInventarioResult = await db.exec(`
+        SELECT
+          COUNT(*) as total_productos,
+          COALESCE(SUM(stock_actual), 0) as unidades_stock,
+          COALESCE(SUM(precio_unitario * stock_actual), 0) as valor_inventario,
+          SUM(CASE WHEN stock_actual < 10 THEN 1 ELSE 0 END) as bajo_stock_count
+        FROM productos
+      `);
+
+      const resumenCotizaciones = resumenCotizacionesResult[0]?.values[0] || [0, 0, 0, 0, 0, 0, 0];
+      const resumenInventario = resumenInventarioResult[0]?.values[0] || [0, 0, 0, 0];
+      const total = resumenCotizaciones[0] || 0;
+      const pendientes = resumenCotizaciones[1] || 0;
+      const aceptadas = resumenCotizaciones[2] || 0;
+      const valorTotal = resumenCotizaciones[3] || 0;
+      const valorPendiente = resumenCotizaciones[4] || 0;
+      const valorAceptado = resumenCotizaciones[5] || 0;
+      const ticketPromedio = resumenCotizaciones[6] || 0;
+      const totalProductos = resumenInventario[0] || 0;
+      const unidadesStock = resumenInventario[1] || 0;
+      const valorInventario = resumenInventario[2] || 0;
+      const productosBajoStockCount = resumenInventario[3] || 0;
       const tasaConversion = total > 0 ? Math.round((Number(aceptadas) / Number(total)) * 100) : 0;
 
       const pipelineResult = await db.exec(`
@@ -618,10 +631,6 @@ class CotizacionController {
           topProductos.push({ nombre: row[0], cantidad: row[1] });
         });
       }
-
-      // Obtener productos con bajo stock (umbral < 10)
-      const bajoStockCountResult = await db.exec(`SELECT COUNT(*) FROM productos WHERE stock_actual < 10`);
-      const productosBajoStockCount = bajoStockCountResult.length > 0 ? bajoStockCountResult[0].values[0][0] : 0;
 
       const bajoStockListResult = await db.exec(`
         SELECT id, nombre, stock_actual, unidad_medida 

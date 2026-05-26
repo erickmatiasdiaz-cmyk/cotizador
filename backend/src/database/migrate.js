@@ -105,6 +105,10 @@ async function migrate() {
     saveDb();
   }
 
+  await db.run(`CREATE INDEX IF NOT EXISTS idx_cotizaciones_estado ON cotizaciones(estado)`);
+  await db.run(`CREATE INDEX IF NOT EXISTS idx_cotizaciones_creado_en ON cotizaciones(creado_en)`);
+  saveDb();
+
   // Tabla de items de cotización
   await db.run(`
     CREATE TABLE IF NOT EXISTS cotizacion_items (
@@ -118,6 +122,12 @@ async function migrate() {
       FOREIGN KEY (producto_id) REFERENCES productos(id)
     )
   `);
+  saveDb();
+
+  await db.run(`CREATE INDEX IF NOT EXISTS idx_productos_categoria_id ON productos(categoria_id)`);
+  await db.run(`CREATE INDEX IF NOT EXISTS idx_productos_stock_actual ON productos(stock_actual)`);
+  await db.run(`CREATE INDEX IF NOT EXISTS idx_cotizacion_items_cotizacion_id ON cotizacion_items(cotizacion_id)`);
+  await db.run(`CREATE INDEX IF NOT EXISTS idx_cotizacion_items_producto_id ON cotizacion_items(producto_id)`);
   saveDb();
 
   // Tabla de configuración
