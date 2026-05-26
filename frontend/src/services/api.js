@@ -4,22 +4,15 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 const API = axios.create({
   baseURL: API_BASE_URL,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json'
   }
 });
 
-// Interceptor para agregar token
-API.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
-
 // Auth
 export const login = (credentials) => API.post('/auth/login', credentials);
+export const logout = () => API.post('/auth/logout');
 export const getPerfil = () => API.get('/auth/perfil');
 
 // Clientes
@@ -53,20 +46,10 @@ export const convertirVenta = (id) => API.post(`/cotizaciones/${id}/convertir-ve
 export const deleteCotizacion = (id) => API.delete(`/cotizaciones/${id}`);
 export const getCotizacionesEstadisticas = () => API.get('/cotizaciones/estadisticas');
 export const descargarPDF = (id) => {
-  return axios.get(`${API_BASE_URL}/cotizaciones/${id}/pdf`, {
-    responseType: 'blob',
-    headers: {
-      Authorization: `Bearer ${localStorage.getItem('token')}`
-    }
-  });
+  return API.get(`/cotizaciones/${id}/pdf`, { responseType: 'blob' });
 };
 export const descargarFactura = (id) => {
-  return axios.get(`${API_BASE_URL}/cotizaciones/${id}/factura/pdf`, {
-    responseType: 'blob',
-    headers: {
-      Authorization: `Bearer ${localStorage.getItem('token')}`
-    }
-  });
+  return API.get(`/cotizaciones/${id}/factura/pdf`, { responseType: 'blob' });
 };
 export const enviarEmail = (id) => API.post(`/cotizaciones/${id}/enviar-email`);
 

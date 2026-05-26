@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
-import { login as apiLogin, getPerfil } from '../services/api';
+import { login as apiLogin, logout as apiLogout, getPerfil } from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -8,26 +8,24 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      getPerfil()
-        .then(res => setUsuario(res.data))
-        .catch(() => localStorage.removeItem('token'))
-        .finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
+    getPerfil()
+      .then(res => setUsuario(res.data))
+      .catch(() => setUsuario(null))
+      .finally(() => setLoading(false));
   }, []);
 
   const login = async (email, password) => {
     const response = await apiLogin({ email, password });
-    localStorage.setItem('token', response.data.token);
     setUsuario(response.data.usuario);
     return response.data;
   };
 
-  const logout = () => {
-    localStorage.removeItem('token');
+  const logout = async () => {
+    try {
+      await apiLogout();
+    } catch (error) {
+      console.error('No se pudo cerrar sesion en el servidor:', error);
+    }
     setUsuario(null);
   };
 

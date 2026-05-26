@@ -23,8 +23,8 @@ const Layout = ({ children }) => {
     { path: '/catalogo', label: 'Catalogo web', icon: 'WEB' }
   ];
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/login');
   };
 

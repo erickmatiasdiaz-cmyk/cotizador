@@ -2,6 +2,16 @@ const { initDb, saveDb } = require('../config/database');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { audit } = require('../utils/auditLogger');
+const {
+  buildAuthCookie,
+  buildClearAuthCookie,
+  createTokenId,
+  getJwtExpiresIn,
+  getJwtSecret
+} = require('../utils/authSecurity');
+
+const GENERIC_LOGIN_ERROR = 'Credenciales invalidas';
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 async function getSingleRow(db, query, params = []) {
   const stmt = db.prepare(query);
@@ -11,12 +21,31 @@ async function getSingleRow(db, query, params = []) {
   return row;
 }
 
+function normalizeEmail(email = '') {
+  return String(email).trim().toLowerCase();
+}
+
+function isStrongPassword(password = '') {
+  return (
+    typeof password === 'string' &&
+    password.length >= 10 &&
+    /[a-z]/.test(password) &&
+    /[A-Z]/.test(password) &&
+    /\d/.test(password)
+  );
+}
+
 class AuthController {
   async login(req, res) {
     try {
-      const { email, password } = req.body;
+      const email = normalizeEmail(req.body.email);
+      const { password } = req.body;
       if (!email || !password) {
         return res.status(400).json({ error: 'Email y contrasena son requeridos' });
+      }
+      if (!EMAIL_REGEX.test(email) || String(password).length > 200) {
+        req.loginRateLimit?.fail();
+        return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
       }
 
       const db = await initDb();
@@ -27,7 +56,8 @@ class AuthController {
       );
 
       if (!userRow) {
-        return res.status(401).json({ error: 'Credenciales invalidas' });
+        req.loginRateLimit?.fail();
+        return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
       }
 
       const usuario = {
@@ -40,17 +70,19 @@ class AuthController {
 
       const passwordValido = bcrypt.compareSync(password, usuario.password);
       if (!passwordValido) {
-        return res.status(401).json({ error: 'Credenciales invalidas' });
+        req.loginRateLimit?.fail();
+        return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
       }
 
       const token = jwt.sign(
-        { id: usuario.id, email: usuario.email, rol: usuario.rol },
-        process.env.JWT_SECRET || 'dev-secret-change-me',
-        { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+        { id: usuario.id, email: usuario.email, rol: usuario.rol, jti: createTokenId() },
+        getJwtSecret(),
+        { expiresIn: getJwtExpiresIn() }
       );
 
+      req.loginRateLimit?.reset();
+      res.setHeader('Set-Cookie', buildAuthCookie(token));
       res.json({
-        token,
         usuario: {
           id: usuario.id,
           nombre: usuario.nombre,
@@ -66,9 +98,18 @@ class AuthController {
 
   async registrar(req, res) {
     try {
-      const { nombre, email, password, rol } = req.body;
+      const { nombre, password, rol } = req.body;
+      const email = normalizeEmail(req.body.email);
       if (!nombre || !email || !password) {
         return res.status(400).json({ error: 'Nombre, email y contrasena son requeridos' });
+      }
+      if (!EMAIL_REGEX.test(email)) {
+        return res.status(400).json({ error: 'Email invalido' });
+      }
+      if (!isStrongPassword(password)) {
+        return res.status(400).json({
+          error: 'La contrasena debe tener al menos 10 caracteres, una mayuscula, una minuscula y un numero'
+        });
       }
       const rolesValidos = ['admin', 'vendedor'];
       const rolNormalizado = rolesValidos.includes(rol) ? rol : 'vendedor';
@@ -100,6 +141,11 @@ class AuthController {
       console.error('Error en registro:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
     }
+  }
+
+  async logout(req, res) {
+    res.setHeader('Set-Cookie', buildClearAuthCookie());
+    res.json({ message: 'Sesion cerrada correctamente' });
   }
 
   async getPerfil(req, res) {
