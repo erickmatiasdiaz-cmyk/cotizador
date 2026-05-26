@@ -694,7 +694,7 @@ class CotizacionController {
       }
 
       if (!estadisticasInFlight) {
-        estadisticasInFlight = this.buildEstadisticas()
+        estadisticasInFlight = CotizacionController.prototype.buildEstadisticas()
           .then(data => {
             estadisticasCache = {
               data,
