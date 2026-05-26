@@ -2,8 +2,12 @@ const { initDb, saveDb } = require('../config/database');
 const { audit } = require('../utils/auditLogger');
 
 const STOCK_FLAG_TRUE = (db) => (db.isPostgres ? true : 1);
+const ESTADISTICAS_CACHE_MS = 30000;
 
 const isStockDiscounted = (value) => value === true || value === 1 || value === '1' || value === 't';
+
+let estadisticasCache = null;
+let estadisticasInFlight = null;
 
 async function getCotizacionItemsForStock(db, cotizacionId) {
   const itemsResult = await db.exec(`
@@ -539,7 +543,7 @@ class CotizacionController {
     }
   }
 
-  async getEstadisticas(req, res) {
+  async buildEstadisticas() {
     try {
       const db = await initDb();
       
@@ -647,7 +651,7 @@ class CotizacionController {
         });
       }
 
-      res.json({
+      return {
         total,
         pendientes,
         aceptadas,
@@ -674,9 +678,39 @@ class CotizacionController {
         topProductos,
         bajoStockCount: productosBajoStockCount,
         bajoStockLista
-      });
+      };
     } catch (error) {
       console.error('Error al obtener estadísticas:', error);
+      throw error;
+    }
+  }
+
+  async getEstadisticas(req, res) {
+    try {
+      const now = Date.now();
+
+      if (estadisticasCache && estadisticasCache.expiresAt > now) {
+        return res.json(estadisticasCache.data);
+      }
+
+      if (!estadisticasInFlight) {
+        estadisticasInFlight = this.buildEstadisticas()
+          .then(data => {
+            estadisticasCache = {
+              data,
+              expiresAt: Date.now() + ESTADISTICAS_CACHE_MS
+            };
+            return data;
+          })
+          .finally(() => {
+            estadisticasInFlight = null;
+          });
+      }
+
+      const data = await estadisticasInFlight;
+      res.json(data);
+    } catch (error) {
+      console.error('Error al obtener estadisticas:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
     }
   }
