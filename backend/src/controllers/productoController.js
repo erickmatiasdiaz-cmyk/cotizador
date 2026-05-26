@@ -1,6 +1,14 @@
 const { initDb, saveDb } = require('../config/database');
 const { audit } = require('../utils/auditLogger');
 
+const METRICAS_CACHE_MS = 30000;
+let metricasCache = null;
+let metricasInFlight = null;
+
+function invalidateMetricasCache() {
+  metricasCache = null;
+}
+
 async function registrarMovimientoStock(db, req, productoId, tipo, cantidad, stockAnterior, stockNuevo, motivo) {
   try {
     await db.run(
@@ -92,6 +100,7 @@ class ProductoController {
       await db.run(`INSERT INTO productos (nombre, descripcion, categoria_id, precio_unitario, stock_actual, unidad_medida, imagen_url) VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [nombre, descripcion || null, categoria_id || null, precio_unitario, stock_actual || 0, unidad_medida || 'unidad', imagen_url || null]);
       saveDb();
+      invalidateMetricasCache();
 
       const result = await db.exec(`SELECT last_insert_rowid()`);
       const id = result[0].values[0][0];
@@ -138,6 +147,7 @@ class ProductoController {
         );
       }
       saveDb();
+      invalidateMetricasCache();
       await audit(req, {
         accion: 'actualizar',
         entidad: 'producto',
@@ -160,6 +170,7 @@ class ProductoController {
       const db = await initDb();
       await db.run(`DELETE FROM productos WHERE id = ?`, [req.params.id]);
       saveDb();
+      invalidateMetricasCache();
       await audit(req, {
         accion: 'eliminar',
         entidad: 'producto',
@@ -236,6 +247,7 @@ class ProductoController {
       }
 
       saveDb();
+      invalidateMetricasCache();
       await audit(req, {
         accion: 'importar',
         entidad: 'producto',
@@ -248,7 +260,7 @@ class ProductoController {
     }
   }
 
-  async getMetricas(req, res) {
+  async buildMetricas() {
     try {
       const db = await initDb();
       const totalResult = await db.exec(`
@@ -281,7 +293,7 @@ class ProductoController {
       `);
 
       const row = totalResult[0]?.values[0] || [0, 0, 0, 0, 0, 0, 0];
-      res.json({
+      return {
         total_productos: row[0],
         unidades_stock: row[1],
         valor_inventario: row[2],
@@ -305,7 +317,37 @@ class ProductoController {
           motivo: item[6],
           creado_en: item[7]
         })) : []
-      });
+      };
+    } catch (error) {
+      console.error('Error al obtener metricas de productos:', error);
+      throw error;
+    }
+  }
+
+  async getMetricas(req, res) {
+    try {
+      const now = Date.now();
+
+      if (metricasCache && metricasCache.expiresAt > now) {
+        return res.json(metricasCache.data);
+      }
+
+      if (!metricasInFlight) {
+        metricasInFlight = ProductoController.prototype.buildMetricas()
+          .then(data => {
+            metricasCache = {
+              data,
+              expiresAt: Date.now() + METRICAS_CACHE_MS
+            };
+            return data;
+          })
+          .finally(() => {
+            metricasInFlight = null;
+          });
+      }
+
+      const data = await metricasInFlight;
+      res.json(data);
     } catch (error) {
       console.error('Error al obtener metricas de productos:', error);
       res.status(500).json({ error: 'Error interno del servidor' });
