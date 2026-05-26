@@ -96,6 +96,7 @@ insert into configuracion (clave, valor) values
   ('SUPERMERCADO_DIRECCION', 'Calle Principal #123'),
   ('SUPERMERCADO_TELEFONO', '+1 234 567 8900'),
   ('SUPERMERCADO_EMAIL', 'contacto@supermercado.com'),
+  ('SUPERMERCADO_LOGO', ''),
   ('IVA_PORCENTAJE', '16'),
   ('MONEDA', 'MXN')
 on conflict (clave) do nothing;

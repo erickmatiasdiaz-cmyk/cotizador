@@ -2,6 +2,49 @@ import React, { useState, useEffect } from 'react';
 import { getConfiguracion, updateConfiguracion, importarInventario } from '../services/api';
 import * as XLSX from 'xlsx';
 
+const MAX_LOGO_BYTES = 1.8 * 1024 * 1024;
+const MAX_LOGO_SIDE = 900;
+
+const optimizeLogo = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const image = new Image();
+
+      image.onload = () => {
+        const scale = Math.min(1, MAX_LOGO_SIDE / Math.max(image.width, image.height));
+        const width = Math.max(1, Math.round(image.width * scale));
+        const height = Math.max(1, Math.round(image.height * scale));
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+
+        canvas.width = width;
+        canvas.height = height;
+        context.drawImage(image, 0, 0, width, height);
+
+        const mimeType = file.type === 'image/png' && file.size <= MAX_LOGO_BYTES
+          ? 'image/png'
+          : 'image/jpeg';
+        const quality = mimeType === 'image/jpeg' ? 0.82 : undefined;
+        const dataUrl = canvas.toDataURL(mimeType, quality);
+
+        if (dataUrl.length > MAX_LOGO_BYTES * 1.4) {
+          reject(new Error('El logo sigue siendo demasiado pesado. Prueba con una imagen mas liviana.'));
+          return;
+        }
+
+        resolve(dataUrl);
+      };
+
+      image.onerror = () => reject(new Error('No se pudo leer la imagen seleccionada.'));
+      image.src = reader.result;
+    };
+
+    reader.onerror = () => reject(new Error('No se pudo cargar el archivo seleccionado.'));
+    reader.readAsDataURL(file);
+  });
+
 const Configuraciones = () => {
   const [config, setConfig] = useState({
     SUPERMERCADO_NOMBRE: '',
@@ -36,14 +79,16 @@ const Configuraciones = () => {
     setConfig(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setConfig(prev => ({ ...prev, SUPERMERCADO_LOGO: reader.result }));
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+
+    try {
+      const optimizedLogo = await optimizeLogo(file);
+      setConfig(prev => ({ ...prev, SUPERMERCADO_LOGO: optimizedLogo }));
+    } catch (error) {
+      alert(error.message || 'No se pudo procesar el logo.');
+      e.target.value = null;
     }
   };
 

@@ -15,6 +15,8 @@ const toHex = ([r, g, b]) =>
 const mix = (rgb, target, amount) =>
   rgb.map((value, index) => value + (target[index] - value) * amount);
 
+const normalizeRgb = (rgb) => rgb.map(value => clamp(value));
+
 const luminance = ([r, g, b]) => {
   const normalized = [r, g, b].map(value => {
     const channel = value / 255;
@@ -23,14 +25,67 @@ const luminance = ([r, g, b]) => {
   return normalized[0] * 0.2126 + normalized[1] * 0.7152 + normalized[2] * 0.0722;
 };
 
+const saturation = ([r, g, b]) => {
+  const max = Math.max(r, g, b) / 255;
+  const min = Math.min(r, g, b) / 255;
+  if (max === 0) return 0;
+  return (max - min) / max;
+};
+
 const isUsefulColor = ([r, g, b, a = 255]) => {
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
-  return a > 180 && max - min > 24 && max > 45 && min < 238;
+  const lum = luminance([r, g, b]);
+  const sat = saturation([r, g, b]);
+
+  return (
+    a > 170 &&
+    sat > 0.16 &&
+    max - min > 18 &&
+    lum > 0.035 &&
+    lum < 0.94 &&
+    !(max > 242 && min > 226) &&
+    !(max < 34)
+  );
 };
 
 const colorDistance = (a, b) =>
   Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2);
+
+const dominantScore = (color) => {
+  const lum = luminance(color.rgb);
+  const sat = saturation(color.rgb);
+  const uiLumPenalty = lum > 0.78 ? 0.72 : lum < 0.08 ? 0.76 : 1;
+
+  return color.count * (0.72 + sat * 0.45) * uiLumPenalty;
+};
+
+const makePrimaryUsable = (rgb) => {
+  const normalized = normalizeRgb(rgb);
+  const lum = luminance(normalized);
+
+  if (lum > 0.72) return mix(normalized, [0, 0, 0], 0.42);
+  if (lum < 0.08) return mix(normalized, [255, 255, 255], 0.18);
+
+  return normalized;
+};
+
+const makeSecondary = (primaryRgb, colors) => {
+  const differentDominant = colors.find(color => (
+    colorDistance(color.rgb, primaryRgb) > 74 &&
+    color.count >= colors[0].count * 0.12
+  ));
+
+  if (differentDominant) {
+    return normalizeRgb(differentDominant.rgb);
+  }
+
+  const primaryLum = luminance(primaryRgb);
+  const target = primaryLum > 0.38 ? [255, 255, 255] : [245, 188, 66];
+  const amount = primaryLum > 0.38 ? 0.34 : 0.48;
+
+  return normalizeRgb(mix(primaryRgb, target, amount));
+};
 
 export const getLogoPalette = (logoUrl) =>
   new Promise(resolve => {
@@ -53,7 +108,7 @@ export const getLogoPalette = (logoUrl) =>
         const { data } = context.getImageData(0, 0, size, size);
         const buckets = new Map();
 
-        for (let index = 0; index < data.length; index += 16) {
+        for (let index = 0; index < data.length; index += 4) {
           const pixel = [data[index], data[index + 1], data[index + 2], data[index + 3]];
           if (!isUsefulColor(pixel)) continue;
 
@@ -69,7 +124,7 @@ export const getLogoPalette = (logoUrl) =>
             count: bucket.count,
             rgb: bucket.rgb.map(value => value / bucket.count)
           }))
-          .sort((a, b) => b.count - a.count);
+          .sort((a, b) => dominantScore(b) - dominantScore(a));
 
         if (colors.length === 0) {
           resolve(DEFAULT_BRAND_THEME);
@@ -77,11 +132,9 @@ export const getLogoPalette = (logoUrl) =>
         }
 
         const primaryRgb = colors[0].rgb;
-        const secondaryRgb =
-          colors.find(color => colorDistance(color.rgb, primaryRgb) > 70)?.rgb ||
-          mix(primaryRgb, [245, 188, 66], 0.55);
+        const primaryForUi = makePrimaryUsable(primaryRgb);
+        const secondaryRgb = makeSecondary(primaryRgb, colors);
 
-        const primaryForUi = luminance(primaryRgb) > 0.52 ? mix(primaryRgb, [0, 0, 0], 0.45) : primaryRgb;
         const primaryDark = mix(primaryForUi, [0, 0, 0], 0.35);
         const soft = mix(primaryForUi, [255, 255, 255], 0.9);
         const surface = mix(primaryForUi, [255, 255, 255], 0.94);

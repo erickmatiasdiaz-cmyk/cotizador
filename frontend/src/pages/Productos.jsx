@@ -3,6 +3,45 @@ import { useForm } from 'react-hook-form';
 import { getProductos, getCategorias, getProductosMetricas, createProducto, updateProducto, deleteProducto } from '../services/api';
 import { formatCurrency } from '../utils/formatters';
 
+const MAX_PRODUCT_IMAGE_BYTES = 1.6 * 1024 * 1024;
+const MAX_PRODUCT_IMAGE_SIDE = 1100;
+
+const optimizeProductImage = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const image = new Image();
+
+      image.onload = () => {
+        const scale = Math.min(1, MAX_PRODUCT_IMAGE_SIDE / Math.max(image.width, image.height));
+        const width = Math.max(1, Math.round(image.width * scale));
+        const height = Math.max(1, Math.round(image.height * scale));
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+
+        canvas.width = width;
+        canvas.height = height;
+        context.drawImage(image, 0, 0, width, height);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.84);
+
+        if (dataUrl.length > MAX_PRODUCT_IMAGE_BYTES * 1.4) {
+          reject(new Error('La imagen sigue siendo demasiado pesada. Prueba con una foto mas liviana.'));
+          return;
+        }
+
+        resolve(dataUrl);
+      };
+
+      image.onerror = () => reject(new Error('No se pudo leer la imagen seleccionada.'));
+      image.src = reader.result;
+    };
+
+    reader.onerror = () => reject(new Error('No se pudo cargar el archivo seleccionado.'));
+    reader.readAsDataURL(file);
+  });
+
 const Productos = () => {
   const [productos, setProductos] = useState([]);
   const [categorias, setCategorias] = useState([]);
@@ -13,7 +52,7 @@ const Productos = () => {
   const [showForm, setShowForm] = useState(false);
   const [metricas, setMetricas] = useState(null);
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm({
+  const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm({
     defaultValues: {
       nombre: '',
       descripcion: '',
@@ -24,6 +63,7 @@ const Productos = () => {
       imagen_url: ''
     }
   });
+  const imagenPreview = watch('imagen_url');
 
   useEffect(() => {
     loadProductos();
@@ -87,6 +127,19 @@ const Productos = () => {
     reset();
     setEditingId(null);
     setShowForm(false);
+  };
+
+  const handleImageUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    try {
+      const optimizedImage = await optimizeProductImage(file);
+      setValue('imagen_url', optimizedImage, { shouldDirty: true });
+    } catch (error) {
+      alert(error.message || 'No se pudo procesar la imagen.');
+      event.target.value = null;
+    }
   };
 
   return (
@@ -175,15 +228,43 @@ const Productos = () => {
                 />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  URL de Imagen (Opcional)
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Imagen del producto
                 </label>
-                <input
-                  type="url"
-                  {...register('imagen_url')}
-                  placeholder="https://ejemplo.com/imagen.jpg"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
+                <input type="hidden" {...register('imagen_url')} />
+                <div className="flex flex-col gap-4 rounded-xl border border-gray-200 bg-slate-50 p-4 sm:flex-row sm:items-center">
+                  {imagenPreview ? (
+                    <img
+                      src={imagenPreview}
+                      alt="Vista previa del producto"
+                      className="h-28 w-28 rounded-lg border border-gray-200 bg-white object-cover shadow-sm"
+                    />
+                  ) : (
+                    <div className="flex h-28 w-28 items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-white text-sm font-semibold text-gray-400">
+                      Sin imagen
+                    </div>
+                  )}
+                  <div className="flex-1">
+                    <div className="flex flex-wrap gap-3">
+                      <label className="cursor-pointer rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-bold text-gray-700 shadow-sm transition hover:bg-gray-50">
+                        Seleccionar imagen
+                        <input type="file" className="sr-only" accept="image/*" onChange={handleImageUpload} />
+                      </label>
+                      {imagenPreview && (
+                        <button
+                          type="button"
+                          onClick={() => setValue('imagen_url', '', { shouldDirty: true })}
+                          className="rounded-lg bg-red-50 px-4 py-2 text-sm font-bold text-red-700 transition hover:bg-red-100"
+                        >
+                          Quitar imagen
+                        </button>
+                      )}
+                    </div>
+                    <p className="mt-2 text-xs text-gray-500">
+                      La imagen se optimiza y se guarda en la base de datos junto al producto.
+                    </p>
+                  </div>
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
