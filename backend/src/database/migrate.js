@@ -134,6 +134,23 @@ async function migrate() {
   saveDb();
 
   // Insertar configuración por defecto
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS stock_movimientos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      producto_id INTEGER,
+      usuario_id INTEGER,
+      tipo TEXT NOT NULL,
+      cantidad REAL NOT NULL DEFAULT 0,
+      stock_anterior REAL NOT NULL DEFAULT 0,
+      stock_nuevo REAL NOT NULL DEFAULT 0,
+      motivo TEXT,
+      creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (producto_id) REFERENCES productos(id),
+      FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+    )
+  `);
+  saveDb();
+
   const configDefaults = [
     ['SUPERMERCADO_NOMBRE', 'Mi Supermercado'],
     ['SUPERMERCADO_DIRECCION', 'Calle Principal #123'],

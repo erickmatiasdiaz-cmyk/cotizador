@@ -1,6 +1,20 @@
 const { initDb, saveDb } = require('../config/database');
 const { audit } = require('../utils/auditLogger');
 
+async function registrarMovimientoStock(db, req, productoId, tipo, cantidad, stockAnterior, stockNuevo, motivo) {
+  try {
+    await db.run(
+      `INSERT INTO stock_movimientos (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_nuevo, motivo)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [productoId, req.usuario?.id || null, tipo, cantidad, stockAnterior, stockNuevo, motivo]
+    );
+  } catch (error) {
+    if (!String(error.message || '').includes('stock_movimientos')) {
+      console.error('Error al registrar movimiento de stock:', error.message);
+    }
+  }
+}
+
 class ProductoController {
   async getAll(req, res) {
     try {
@@ -9,7 +23,8 @@ class ProductoController {
       
       let query = `
         SELECT p.id, p.nombre, p.descripcion, p.categoria_id, c.nombre as categoria,
-               p.precio_unitario, p.stock_actual, p.unidad_medida, p.imagen_url
+               p.precio_unitario, p.stock_actual, p.unidad_medida, p.imagen_url,
+               (p.precio_unitario * p.stock_actual) as valor_inventario
         FROM productos p
         LEFT JOIN categorias c ON p.categoria_id = c.id
         WHERE 1=1
@@ -27,7 +42,8 @@ class ProductoController {
       const productos = result.length > 0 ? result[0].values.map(row => ({
         id: row[0], nombre: row[1], descripcion: row[2], categoria_id: row[3],
         categoria: row[4], precio_unitario: row[5], stock_actual: row[6],
-        unidad_medida: row[7], imagen_url: row[8]
+        unidad_medida: row[7], imagen_url: row[8], valor_inventario: row[9],
+        stock_status: Number(row[6]) <= 0 ? 'sin_stock' : Number(row[6]) < 10 ? 'critico' : Number(row[6]) < 25 ? 'bajo' : 'saludable'
       })) : [];
 
       res.json(productos);
@@ -79,6 +95,7 @@ class ProductoController {
 
       const result = await db.exec(`SELECT last_insert_rowid()`);
       const id = result[0].values[0][0];
+      await registrarMovimientoStock(db, req, id, 'entrada_inicial', stock_actual || 0, 0, stock_actual || 0, 'Creacion de producto');
       await audit(req, {
         accion: 'crear',
         entidad: 'producto',
@@ -100,20 +117,37 @@ class ProductoController {
     try {
       const { nombre, descripcion, categoria_id, precio_unitario, stock_actual, unidad_medida, imagen_url } = req.body;
       const db = await initDb();
+      const previousResult = await db.exec(`SELECT stock_actual FROM productos WHERE id = ${Number(req.params.id)}`);
+      const previousStock = previousResult.length > 0 && previousResult[0].values.length > 0
+        ? Number(previousResult[0].values[0][0])
+        : 0;
+      const nextStock = Number(stock_actual || 0);
       
       await db.run(`UPDATE productos SET nombre = ?, descripcion = ?, categoria_id = ?, precio_unitario = ?, stock_actual = ?, unidad_medida = ?, imagen_url = ? WHERE id = ?`,
-        [nombre, descripcion || null, categoria_id || null, precio_unitario, stock_actual || 0, unidad_medida || 'unidad', imagen_url || null, req.params.id]);
+        [nombre, descripcion || null, categoria_id || null, precio_unitario, nextStock, unidad_medida || 'unidad', imagen_url || null, req.params.id]);
+      if (nextStock !== previousStock) {
+        await registrarMovimientoStock(
+          db,
+          req,
+          Number(req.params.id),
+          nextStock > previousStock ? 'ajuste_entrada' : 'ajuste_salida',
+          Math.abs(nextStock - previousStock),
+          previousStock,
+          nextStock,
+          'Ajuste manual desde ficha de producto'
+        );
+      }
       saveDb();
       await audit(req, {
         accion: 'actualizar',
         entidad: 'producto',
         entidad_id: Number(req.params.id),
-        detalle: { nombre, precio_unitario, stock_actual }
+        detalle: { nombre, precio_unitario, stock_actual: nextStock }
       });
 
       res.json({
         id: parseInt(req.params.id), nombre, descripcion, categoria_id,
-        precio_unitario, stock_actual, unidad_medida, imagen_url
+        precio_unitario, stock_actual: nextStock, unidad_medida, imagen_url
       });
     } catch (error) {
       console.error('Error al actualizar producto:', error);
@@ -185,13 +219,18 @@ class ProductoController {
         if (existsResult.length > 0 && existsResult[0].values.length > 0) {
           // Existe: actualizar
           const existingId = existsResult[0].values[0][0];
+          const previousStock = Number(existsResult[0].values[0][1]);
           await db.run(`UPDATE productos SET precio_unitario = ?, stock_actual = stock_actual + ?, descripcion = ? WHERE id = ?`,
             [precio_unitario, stock_actual, descripcion, existingId]);
+          await registrarMovimientoStock(db, req, existingId, 'importacion_entrada', stock_actual, previousStock, previousStock + stock_actual, 'Importacion masiva');
           actualizados++;
         } else {
           // No existe: crear
           await db.run(`INSERT INTO productos (nombre, descripcion, precio_unitario, stock_actual, unidad_medida) VALUES (?, ?, ?, ?, ?)`,
             [nombre, descripcion, precio_unitario, stock_actual, 'unidad']);
+          const insertedResult = await db.exec(`SELECT last_insert_rowid()`);
+          const insertedId = insertedResult[0].values[0][0];
+          await registrarMovimientoStock(db, req, insertedId, 'importacion_inicial', stock_actual, 0, stock_actual, 'Importacion masiva');
           agregados++;
         }
       }
@@ -206,6 +245,70 @@ class ProductoController {
     } catch (error) {
       console.error('Error al importar productos:', error);
       res.status(500).json({ error: 'Error interno del servidor al importar masivamente' });
+    }
+  }
+
+  async getMetricas(req, res) {
+    try {
+      const db = await initDb();
+      const totalResult = await db.exec(`
+        SELECT 
+          COUNT(*) as total_productos,
+          COALESCE(SUM(stock_actual), 0) as unidades_stock,
+          COALESCE(SUM(precio_unitario * stock_actual), 0) as valor_inventario,
+          COALESCE(AVG(precio_unitario), 0) as precio_promedio,
+          SUM(CASE WHEN stock_actual <= 0 THEN 1 ELSE 0 END) as sin_stock,
+          SUM(CASE WHEN stock_actual > 0 AND stock_actual < 10 THEN 1 ELSE 0 END) as criticos,
+          SUM(CASE WHEN stock_actual >= 10 AND stock_actual < 25 THEN 1 ELSE 0 END) as bajos
+        FROM productos
+      `);
+
+      const categoriasResult = await db.exec(`
+        SELECT c.nombre, COUNT(p.id) as productos, COALESCE(SUM(p.stock_actual), 0) as unidades,
+               COALESCE(SUM(p.precio_unitario * p.stock_actual), 0) as valor
+        FROM categorias c
+        LEFT JOIN productos p ON p.categoria_id = c.id
+        GROUP BY c.id, c.nombre
+        ORDER BY valor DESC
+      `);
+
+      const movimientosResult = await db.exec(`
+        SELECT sm.id, p.nombre, sm.tipo, sm.cantidad, sm.stock_anterior, sm.stock_nuevo, sm.motivo, sm.creado_en
+        FROM stock_movimientos sm
+        LEFT JOIN productos p ON p.id = sm.producto_id
+        ORDER BY sm.creado_en DESC
+        LIMIT 8
+      `);
+
+      const row = totalResult[0]?.values[0] || [0, 0, 0, 0, 0, 0, 0];
+      res.json({
+        total_productos: row[0],
+        unidades_stock: row[1],
+        valor_inventario: row[2],
+        precio_promedio: row[3],
+        sin_stock: row[4],
+        criticos: row[5],
+        bajos: row[6],
+        categorias: categoriasResult.length > 0 ? categoriasResult[0].values.map(item => ({
+          nombre: item[0],
+          productos: item[1],
+          unidades: item[2],
+          valor: item[3]
+        })) : [],
+        movimientos: movimientosResult.length > 0 ? movimientosResult[0].values.map(item => ({
+          id: item[0],
+          producto: item[1],
+          tipo: item[2],
+          cantidad: item[3],
+          stock_anterior: item[4],
+          stock_nuevo: item[5],
+          motivo: item[6],
+          creado_en: item[7]
+        })) : []
+      });
+    } catch (error) {
+      console.error('Error al obtener metricas de productos:', error);
+      res.status(500).json({ error: 'Error interno del servidor' });
     }
   }
 }

@@ -99,12 +99,19 @@ const CotizacionesList = () => {
     );
   };
 
+  const resumen = cotizaciones.reduce((acc, cot) => {
+    acc.total += Number(cot.total || 0);
+    acc[cot.estado] = (acc[cot.estado] || 0) + 1;
+    return acc;
+  }, { total: 0 });
+
   return (
-    <div>
-      <div className="flex justify-between items-center mb-8">
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold text-gray-800">Cotizaciones</h1>
-          <p className="text-gray-600 mt-1">Gestiona todas las cotizaciones</p>
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-700">Commercial pipeline</p>
+          <h1 className="mt-2 text-3xl font-black tracking-[-0.03em] text-gray-900">Cotizaciones</h1>
+          <p className="text-gray-600 mt-1">Seguimiento, exportacion y control de oportunidades comerciales.</p>
         </div>
         <div className="flex space-x-3">
           <button
@@ -121,6 +128,21 @@ const CotizacionesList = () => {
           </Link>
         </div>
       </div>
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {[
+          ['Valor filtrado', formatCurrency(resumen.total), `${cotizaciones.length} documentos en vista`, 'bg-slate-950 text-white'],
+          ['Pendientes', resumen.pendiente || 0, 'Requieren gestion comercial', 'bg-amber-400 text-slate-950'],
+          ['Aceptadas', resumen.aceptada || 0, 'Listas para convertir o facturar', 'bg-emerald-600 text-white'],
+          ['Facturadas', resumen.facturada || 0, 'Ventas cerradas en el pipeline', 'bg-blue-700 text-white']
+        ].map(([label, value, detail, tone]) => (
+          <article key={label} className={`rounded-2xl p-5 shadow-sm ${tone}`}>
+            <p className="text-xs font-black uppercase tracking-[0.14em] opacity-75">{label}</p>
+            <p className="mt-3 text-2xl font-black">{value}</p>
+            <p className="mt-1 text-sm opacity-75">{detail}</p>
+          </article>
+        ))}
+      </section>
 
       {/* Filters */}
       <div className="bg-white rounded-xl shadow-md p-6 mb-6">

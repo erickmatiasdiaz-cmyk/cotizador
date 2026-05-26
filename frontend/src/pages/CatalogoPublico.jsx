@@ -99,6 +99,13 @@ const CatalogoPublico = () => {
     });
   }, [productos, categoryFilter, search]);
 
+  const productosDestacados = useMemo(() => (
+    [...productos]
+      .filter(producto => Number(producto.stock_actual) > 0)
+      .sort((a, b) => Number(b.stock_actual || 0) - Number(a.stock_actual || 0))
+      .slice(0, 4)
+  ), [productos]);
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (carrito.length === 0) return;
@@ -228,6 +235,34 @@ const CatalogoPublico = () => {
           </section>
         ) : (
           <>
+            {productosDestacados.length > 0 && (
+              <section className="mb-8 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+                <div className="mb-4 flex items-end justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.16em]" style={{ color: 'var(--brand-primary)' }}>Seleccion premium</p>
+                    <h2 className="mt-1 text-2xl font-black tracking-[-0.03em] text-slate-950">Productos con mejor disponibilidad</h2>
+                  </div>
+                  <span className="hidden text-sm font-bold text-slate-500 sm:inline">Stock alto, respuesta mas rapida</span>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  {productosDestacados.map(producto => (
+                    <button
+                      type="button"
+                      key={producto.id}
+                      onClick={() => addToCart(producto)}
+                      className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 p-3 text-left transition hover:-translate-y-0.5 hover:bg-white hover:shadow-md"
+                    >
+                      <img src={producto.imagen_url} alt={producto.nombre} className="h-14 w-14 rounded-lg object-cover" />
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-black text-slate-950">{producto.nombre}</span>
+                        <span className="mt-1 block text-xs font-bold text-slate-500">{formatCurrency(producto.precio_unitario)} · {producto.stock_actual} disp.</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+
             <section className="mb-6 grid gap-3 md:grid-cols-[1fr_auto]">
               <input
                 value={search}

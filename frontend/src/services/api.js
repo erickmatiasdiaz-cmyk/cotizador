@@ -31,6 +31,7 @@ export const deleteCliente = (id) => API.delete(`/clientes/${id}`);
 
 // Productos
 export const getProductos = (params) => API.get('/productos', { params });
+export const getProductosMetricas = () => API.get('/productos/metricas');
 export const getProducto = (id) => API.get(`/productos/${id}`);
 export const createProducto = (data) => API.post('/productos', data);
 export const importarInventario = (productos) => API.post('/productos/importar', productos);

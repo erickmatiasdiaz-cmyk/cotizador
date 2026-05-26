@@ -310,6 +310,17 @@ class CotizacionController {
 
       for (const item of items) {
         await db.run(`UPDATE productos SET stock_actual = stock_actual - ? WHERE id = ?`, [item[1], item[0]]);
+        try {
+          await db.run(
+            `INSERT INTO stock_movimientos (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_nuevo, motivo)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [item[0], req.usuario.id, 'venta_salida', item[1], item[3], Number(item[3]) - Number(item[1]), `Venta desde cotizacion ${id}`]
+          );
+        } catch (error) {
+          if (!String(error.message || '').includes('stock_movimientos')) {
+            console.error('Error al registrar salida de stock:', error.message);
+          }
+        }
       }
 
       // Generar número factura
@@ -428,11 +439,42 @@ class CotizacionController {
       const pendientesResult = await db.exec(`SELECT COUNT(*) FROM cotizaciones WHERE estado = 'pendiente'`);
       const aceptadasResult = await db.exec(`SELECT COUNT(*) FROM cotizaciones WHERE estado = 'aceptada'`);
       const valorTotalResult = await db.exec(`SELECT COALESCE(SUM(total), 0) FROM cotizaciones`);
+      const valorPendienteResult = await db.exec(`SELECT COALESCE(SUM(total), 0) FROM cotizaciones WHERE estado = 'pendiente'`);
+      const valorAceptadoResult = await db.exec(`SELECT COALESCE(SUM(total), 0) FROM cotizaciones WHERE estado IN ('aceptada', 'facturada')`);
+      const ticketPromedioResult = await db.exec(`SELECT COALESCE(AVG(total), 0) FROM cotizaciones`);
+      const productosResult = await db.exec(`SELECT COUNT(*) FROM productos`);
+      const unidadesStockResult = await db.exec(`SELECT COALESCE(SUM(stock_actual), 0) FROM productos`);
+      const valorInventarioResult = await db.exec(`SELECT COALESCE(SUM(precio_unitario * stock_actual), 0) FROM productos`);
 
       const total = totalResult.length > 0 ? totalResult[0].values[0][0] : 0;
       const pendientes = pendientesResult.length > 0 ? pendientesResult[0].values[0][0] : 0;
       const aceptadas = aceptadasResult.length > 0 ? aceptadasResult[0].values[0][0] : 0;
       const valorTotal = valorTotalResult.length > 0 && valorTotalResult[0].values[0][0] !== null ? valorTotalResult[0].values[0][0] : 0;
+      const valorPendiente = valorPendienteResult.length > 0 ? valorPendienteResult[0].values[0][0] : 0;
+      const valorAceptado = valorAceptadoResult.length > 0 ? valorAceptadoResult[0].values[0][0] : 0;
+      const ticketPromedio = ticketPromedioResult.length > 0 ? ticketPromedioResult[0].values[0][0] : 0;
+      const totalProductos = productosResult.length > 0 ? productosResult[0].values[0][0] : 0;
+      const unidadesStock = unidadesStockResult.length > 0 ? unidadesStockResult[0].values[0][0] : 0;
+      const valorInventario = valorInventarioResult.length > 0 ? valorInventarioResult[0].values[0][0] : 0;
+      const tasaConversion = total > 0 ? Math.round((Number(aceptadas) / Number(total)) * 100) : 0;
+
+      const pipelineResult = await db.exec(`
+        SELECT estado, COUNT(*) as cantidad, COALESCE(SUM(total), 0) as valor
+        FROM cotizaciones
+        GROUP BY estado
+        ORDER BY valor DESC
+      `);
+
+      const categoriasInventarioResult = await db.exec(`
+        SELECT COALESCE(c.nombre, 'Sin categoria') as categoria,
+               COUNT(p.id) as productos,
+               COALESCE(SUM(p.stock_actual), 0) as unidades,
+               COALESCE(SUM(p.precio_unitario * p.stock_actual), 0) as valor
+        FROM productos p
+        LEFT JOIN categorias c ON c.id = p.categoria_id
+        GROUP BY c.nombre
+        ORDER BY valor DESC
+      `);
 
       // Obtener ventas por día (últimos 7 días para la gráfica)
       const ventasDiaResult = await db.exec(`
@@ -493,6 +535,24 @@ class CotizacionController {
         pendientes,
         aceptadas,
         valor_total: valorTotal,
+        valor_pendiente: valorPendiente,
+        valor_aceptado: valorAceptado,
+        ticket_promedio: ticketPromedio,
+        tasa_conversion: tasaConversion,
+        total_productos: totalProductos,
+        unidades_stock: unidadesStock,
+        valor_inventario: valorInventario,
+        pipeline: pipelineResult.length > 0 ? pipelineResult[0].values.map(row => ({
+          estado: row[0],
+          cantidad: row[1],
+          valor: row[2]
+        })) : [],
+        categoriasInventario: categoriasInventarioResult.length > 0 ? categoriasInventarioResult[0].values.map(row => ({
+          categoria: row[0],
+          productos: row[1],
+          unidades: row[2],
+          valor: row[3]
+        })) : [],
         ventasPorDia,
         topProductos,
         bajoStockCount: productosBajoStockCount,

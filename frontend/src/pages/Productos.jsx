@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { getProductos, getCategorias, createProducto, updateProducto, deleteProducto } from '../services/api';
+import { getProductos, getCategorias, getProductosMetricas, createProducto, updateProducto, deleteProducto } from '../services/api';
 import { formatCurrency } from '../utils/formatters';
 
 const Productos = () => {
@@ -11,6 +11,7 @@ const Productos = () => {
   const [search, setSearch] = useState('');
   const [categoriaFilter, setCategoriaFilter] = useState('');
   const [showForm, setShowForm] = useState(false);
+  const [metricas, setMetricas] = useState(null);
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm({
     defaultValues: {
@@ -35,6 +36,7 @@ const Productos = () => {
       .then(res => setProductos(res.data))
       .catch(console.error)
       .finally(() => setLoading(false));
+    getProductosMetricas().then(res => setMetricas(res.data)).catch(console.error);
   };
 
   const onSubmit = async (data) => {
@@ -88,11 +90,12 @@ const Productos = () => {
   };
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-8">
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold text-gray-800">Productos</h1>
-          <p className="text-gray-600 mt-1">Gestiona el catálogo de productos</p>
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-700">Inventory command center</p>
+          <h1 className="mt-2 text-3xl font-black tracking-[-0.03em] text-gray-900">Productos e inventario</h1>
+          <p className="text-gray-600 mt-1">Gestion comercial, valorizacion y alertas operativas del catalogo.</p>
         </div>
         <button
           onClick={() => {
@@ -105,6 +108,41 @@ const Productos = () => {
           ➕ Nuevo Producto
         </button>
       </div>
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {[
+          ['Productos activos', metricas?.total_productos || 0, `${metricas?.unidades_stock || 0} unidades totales`, 'bg-slate-950 text-white'],
+          ['Inventario valorizado', formatCurrency(metricas?.valor_inventario || 0), 'Precio x stock disponible', 'bg-blue-700 text-white'],
+          ['Stock critico', Number(metricas?.criticos || 0) + Number(metricas?.sin_stock || 0), 'Productos bajo umbral operativo', 'bg-rose-600 text-white'],
+          ['Precio promedio', formatCurrency(metricas?.precio_promedio || 0), 'Referencia comercial catalogo', 'bg-amber-400 text-slate-950']
+        ].map(([label, value, detail, tone]) => (
+          <article key={label} className={`rounded-2xl p-5 shadow-sm ${tone}`}>
+            <p className="text-xs font-black uppercase tracking-[0.14em] opacity-75">{label}</p>
+            <p className="mt-3 text-2xl font-black">{value}</p>
+            <p className="mt-1 text-sm opacity-75">{detail}</p>
+          </article>
+        ))}
+      </section>
+
+      {metricas?.movimientos?.length > 0 && (
+        <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+          <div className="mb-4">
+            <h2 className="text-lg font-black text-slate-950">Ultimos movimientos de stock</h2>
+            <p className="text-sm text-slate-500">Trazabilidad base para auditoria e inventario profesional.</p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {metricas.movimientos.slice(0, 4).map((mov) => (
+              <div key={mov.id} className="rounded-xl bg-slate-50 p-4">
+                <p className="truncate text-sm font-black text-slate-950">{mov.producto || 'Producto eliminado'}</p>
+                <p className="mt-1 text-xs font-bold uppercase tracking-[0.1em] text-slate-500">{mov.tipo}</p>
+                <p className="mt-3 text-sm text-slate-600">
+                  {mov.stock_anterior} -&gt; <span className="font-black text-slate-950">{mov.stock_nuevo}</span>
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Form */}
       {showForm && (
@@ -260,6 +298,7 @@ const Productos = () => {
                   <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Categoría</th>
                   <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Precio</th>
                   <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Stock</th>
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Valor</th>
                   <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Unidad</th>
                   <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Acciones</th>
                 </tr>
@@ -295,6 +334,7 @@ const Productos = () => {
                         {producto.stock_actual}
                       </span>
                     </td>
+                    <td className="py-3 px-4 text-sm font-black text-slate-900">{formatCurrency(producto.valor_inventario || 0)}</td>
                     <td className="py-3 px-4 text-sm">{producto.unidad_medida}</td>
                     <td className="py-3 px-4">
                       <div className="flex space-x-2">

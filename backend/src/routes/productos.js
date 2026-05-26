@@ -8,6 +8,7 @@ router.use(authMiddleware);
 
 router.get('/', productoController.getAll);
 router.get('/categorias', productoController.getCategorias);
+router.get('/metricas', productoController.getMetricas);
 router.get('/:id', productoController.getById);
 router.post('/', requireAdmin, productoController.create);
 router.post('/importar', requireAdmin, productoController.importarMasivamente);
