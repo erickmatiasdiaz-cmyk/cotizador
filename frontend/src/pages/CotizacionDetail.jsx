@@ -51,14 +51,18 @@ const CotizacionDetail = () => {
   };
 
   const handleUpdateEstado = async (estado) => {
-    if (!window.confirm(`¿Marcar cotización como ${estado}?`)) return;
+    const message = estado === 'aceptada'
+      ? '¿Aceptar esta cotización? Se descontará el stock de los productos inmediatamente.'
+      : `¿Marcar cotización como ${estado}?`;
+
+    if (!window.confirm(message)) return;
     
     try {
-      await updateCotizacionEstado(id, { estado });
-      alert(`Cotización marcada como ${estado}`);
+      const response = await updateCotizacionEstado(id, { estado });
+      alert(response.data?.message || `Cotización marcada como ${estado}`);
       loadCotizacion();
     } catch (error) {
-      alert('Error al actualizar estado');
+      alert(error.response?.data?.error || 'Error al actualizar estado');
     }
   };
 
@@ -93,11 +97,11 @@ const CotizacionDetail = () => {
   };
 
   const handleConvertirVenta = async () => {
-    if (!window.confirm('¿Estás seguro de convertir esta cotización en VENTA? Esto descontará el inventario irreversiblemente.')) return;
+    if (!window.confirm('¿Emitir la factura/venta para esta cotización aceptada? El stock ya fue descontado al aceptarla.')) return;
     
     try {
       await convertirVenta(id);
-      alert('Venta concretada y stock actualizado exitosamente.');
+      alert('Venta facturada exitosamente.');
       loadCotizacion();
     } catch (error) {
       alert(error.response?.data?.error || 'Error al convertir en venta');
@@ -156,6 +160,11 @@ const CotizacionDetail = () => {
                 COMPROBANTE: {cotizacion.factura_numero}
               </span>
             )}
+            {cotizacion.stock_descontado && (
+              <span className="ml-2 px-3 py-1 bg-emerald-100 text-emerald-800 rounded-lg font-bold text-sm">
+                STOCK DESCONTADO
+              </span>
+            )}
           </div>
           <p className="text-gray-600">
             Creada el {new Date(cotizacion.creado_en).toLocaleDateString('es-MX')}
@@ -198,7 +207,7 @@ const CotizacionDetail = () => {
                 onClick={() => handleUpdateEstado('aceptada')}
                 className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition"
               >
-                ✅ Marcar como Aceptada
+                ✅ Aceptar y Descontar Stock
               </button>
               <button
                 onClick={() => handleUpdateEstado('rechazada')}
@@ -219,7 +228,7 @@ const CotizacionDetail = () => {
               onClick={handleConvertirVenta}
               className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition font-bold"
             >
-              💳 Convertir a Venta Facturada
+              💳 Emitir Venta Facturada
             </button>
           )}
         </div>

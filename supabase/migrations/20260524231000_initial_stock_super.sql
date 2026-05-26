@@ -50,6 +50,7 @@ create table if not exists cotizaciones (
   validez_dias integer not null default 15,
   fecha_validez date,
   estado text not null default 'pendiente',
+  stock_descontado boolean not null default false,
   enviado_email boolean not null default false,
   creado_en timestamptz not null default now(),
   actualizado_en timestamptz not null default now(),

@@ -1,6 +1,70 @@
 const { initDb, saveDb } = require('../config/database');
 const { audit } = require('../utils/auditLogger');
 
+const STOCK_FLAG_TRUE = (db) => (db.isPostgres ? true : 1);
+
+const isStockDiscounted = (value) => value === true || value === 1 || value === '1' || value === 't';
+
+async function getCotizacionItemsForStock(db, cotizacionId) {
+  const itemsResult = await db.exec(`
+    SELECT ci.producto_id, ci.cantidad, p.nombre, p.stock_actual
+    FROM cotizacion_items ci
+    JOIN productos p ON p.id = ci.producto_id
+    WHERE ci.cotizacion_id = ${cotizacionId}
+  `);
+
+  return itemsResult.length > 0 ? itemsResult[0].values : [];
+}
+
+async function descontarStockCotizacion(db, req, cotizacionId) {
+  const items = await getCotizacionItemsForStock(db, cotizacionId);
+
+  if (items.length === 0) {
+    throw new Error('La cotizacion no tiene productos para descontar stock');
+  }
+
+  for (const item of items) {
+    const cantidad = Number(item[1]);
+    const stockActual = Number(item[3]);
+
+    if (cantidad > stockActual) {
+      throw new Error(`Stock insuficiente para ${item[2]}. Disponible: ${stockActual}, requerido: ${cantidad}`);
+    }
+  }
+
+  for (const item of items) {
+    const productoId = item[0];
+    const cantidad = Number(item[1]);
+    const stockAnterior = Number(item[3]);
+    const stockNuevo = stockAnterior - cantidad;
+
+    await db.run(`UPDATE productos SET stock_actual = stock_actual - ? WHERE id = ?`, [cantidad, productoId]);
+    await db.run(
+      `INSERT INTO stock_movimientos (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_nuevo, motivo)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [productoId, req.usuario.id, 'cotizacion_aceptada_salida', cantidad, stockAnterior, stockNuevo, `Stock descontado al aceptar cotizacion ${cotizacionId}`]
+    );
+  }
+}
+
+async function reponerStockCotizacion(db, req, cotizacionId) {
+  const items = await getCotizacionItemsForStock(db, cotizacionId);
+
+  for (const item of items) {
+    const productoId = item[0];
+    const cantidad = Number(item[1]);
+    const stockAnterior = Number(item[3]);
+    const stockNuevo = stockAnterior + cantidad;
+
+    await db.run(`UPDATE productos SET stock_actual = stock_actual + ? WHERE id = ?`, [cantidad, productoId]);
+    await db.run(
+      `INSERT INTO stock_movimientos (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_nuevo, motivo)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [productoId, req.usuario.id, 'cotizacion_revertida_entrada', cantidad, stockAnterior, stockNuevo, `Stock repuesto al revertir cotizacion ${cotizacionId}`]
+    );
+  }
+}
+
 class CotizacionController {
   async getAll(req, res) {
     try {
@@ -14,7 +78,7 @@ class CotizacionController {
           c.usuario_id, COALESCE(u.nombre, '(Usuario eliminado)') as usuario_nombre,
           c.subtotal, c.iva, c.descuento_porcentaje, c.descuento_monto, c.total,
           c.notas, c.validez_dias, c.fecha_validez, c.estado,
-          c.enviado_email, c.creado_en, c.actualizado_en,
+          c.stock_descontado, c.enviado_email, c.creado_en, c.actualizado_en,
           c.factura_numero, c.factura_fecha
         FROM cotizaciones c
         LEFT JOIN clientes cl ON c.cliente_id = cl.id
@@ -46,8 +110,9 @@ class CotizacionController {
         subtotal: row[7], iva: row[8], descuento_porcentaje: row[9],
         descuento_monto: row[10], total: row[11], notas: row[12],
         validez_dias: row[13], fecha_validez: row[14], estado: row[15],
-        enviado_email: row[16], creado_en: row[17], actualizado_en: row[18],
-        factura_numero: row[19], factura_fecha: row[20]
+        stock_descontado: isStockDiscounted(row[16]), enviado_email: row[17],
+        creado_en: row[18], actualizado_en: row[19],
+        factura_numero: row[20], factura_fecha: row[21]
       })) : [];
 
       res.json(cotizaciones);
@@ -69,7 +134,7 @@ class CotizacionController {
           c.usuario_id, COALESCE(u.nombre, '(Usuario eliminado)') as usuario_nombre, u.email as usuario_email,
           c.subtotal, c.iva, c.descuento_porcentaje, c.descuento_monto, c.total,
           c.notas, c.validez_dias, c.fecha_validez, c.estado,
-          c.enviado_email, c.creado_en, c.actualizado_en,
+          c.stock_descontado, c.enviado_email, c.creado_en, c.actualizado_en,
           c.factura_numero, c.factura_fecha
         FROM cotizaciones c
         LEFT JOIN clientes cl ON c.cliente_id = cl.id
@@ -91,8 +156,9 @@ class CotizacionController {
         subtotal: row[12], iva: row[13], descuento_porcentaje: row[14],
         descuento_monto: row[15], total: row[16], notas: row[17],
         validez_dias: row[18], fecha_validez: row[19], estado: row[20],
-        enviado_email: row[21], creado_en: row[22], actualizado_en: row[23],
-        factura_numero: row[24], factura_fecha: row[25]
+        stock_descontado: isStockDiscounted(row[21]), enviado_email: row[22],
+        creado_en: row[23], actualizado_en: row[24],
+        factura_numero: row[25], factura_fecha: row[26]
       };
 
       const itemsResult = await db.exec(`
@@ -237,28 +303,70 @@ class CotizacionController {
       }
 
       const db = await initDb();
-      const currentResult = await db.exec(`SELECT estado FROM cotizaciones WHERE id = ${Number(req.params.id)}`);
+      const id = Number(req.params.id);
+
+      if (!Number.isInteger(id)) {
+        return res.status(400).json({ error: 'ID de cotizacion invalido' });
+      }
+
+      const currentResult = await db.exec(`SELECT estado, stock_descontado FROM cotizaciones WHERE id = ${id}`);
       if (currentResult.length === 0 || currentResult[0].values.length === 0) {
         return res.status(404).json({ error: 'Cotizacion no encontrada' });
       }
-      if (currentResult[0].values[0][0] === 'facturada') {
+      const estadoActual = currentResult[0].values[0][0];
+      const stockDescontado = isStockDiscounted(currentResult[0].values[0][1]);
+
+      if (estadoActual === 'facturada') {
         return res.status(400).json({ error: 'Una venta facturada no puede cambiar de estado' });
       }
 
-      await db.run(`UPDATE cotizaciones SET estado = ?, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?`,
-        [estado, req.params.id]);
+      if (estadoActual === estado) {
+        return res.json({ message: 'Estado sin cambios', estado, stock_descontado: stockDescontado });
+      }
+
+      await db.run('BEGIN');
+
+      try {
+        let nextStockDescontado = stockDescontado;
+
+        if (estado === 'aceptada' && !stockDescontado) {
+          await descontarStockCotizacion(db, req, id);
+          nextStockDescontado = true;
+        }
+
+        if (estado !== 'aceptada' && stockDescontado) {
+          await reponerStockCotizacion(db, req, id);
+          nextStockDescontado = false;
+        }
+
+        await db.run(
+          `UPDATE cotizaciones SET estado = ?, stock_descontado = ?, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?`,
+          [estado, STOCK_FLAG_TRUE(db) === true ? nextStockDescontado : Number(nextStockDescontado), id]
+        );
+        await db.run('COMMIT');
+      } catch (error) {
+        await db.run('ROLLBACK');
+        throw error;
+      }
+
       saveDb();
       await audit(req, {
         accion: 'cambiar_estado',
         entidad: 'cotizacion',
-        entidad_id: Number(req.params.id),
-        detalle: { estado }
+        entidad_id: id,
+        detalle: { estado, stock_descontado: estado === 'aceptada' }
       });
 
-      res.json({ message: 'Estado actualizado', estado });
+      res.json({
+        message: estado === 'aceptada'
+          ? 'Cotizacion aceptada y stock descontado'
+          : 'Estado actualizado',
+        estado,
+        stock_descontado: estado === 'aceptada'
+      });
     } catch (error) {
       console.error('Error al actualizar estado:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      res.status(500).json({ error: error.message || 'Error interno del servidor' });
     }
   }
 
@@ -271,56 +379,19 @@ class CotizacionController {
         return res.status(400).json({ error: 'ID de cotizacion invalido' });
       }
 
-      const cotResult = await db.exec(`SELECT estado FROM cotizaciones WHERE id = ${id}`);
+      const cotResult = await db.exec(`SELECT estado, stock_descontado FROM cotizaciones WHERE id = ${id}`);
       if (cotResult.length === 0 || cotResult[0].values.length === 0) {
         return res.status(404).json({ error: 'Cotización no encontrada' });
       }
 
       const estadoVirtual = cotResult[0].values[0][0];
+      const stockDescontado = isStockDiscounted(cotResult[0].values[0][1]);
       if (estadoVirtual === 'facturada') {
         return res.status(400).json({ error: 'La cotización ya fue facturada previamente' });
       }
 
       if (estadoVirtual !== 'aceptada') {
         return res.status(400).json({ error: 'Solo una cotizacion aceptada puede convertirse en venta' });
-      }
-
-      const itemsResult = await db.exec(`
-        SELECT ci.producto_id, ci.cantidad, p.nombre, p.stock_actual
-        FROM cotizacion_items ci
-        JOIN productos p ON p.id = ci.producto_id
-        WHERE ci.cotizacion_id = ${id}
-      `);
-
-      if (itemsResult.length === 0 || itemsResult[0].values.length === 0) {
-        return res.status(400).json({ error: 'La cotizacion no tiene productos para facturar' });
-      }
-
-      const items = itemsResult[0].values;
-      for (const item of items) {
-        const cantidad = Number(item[1]);
-        const stockActual = Number(item[3]);
-
-        if (cantidad > stockActual) {
-          return res.status(400).json({
-            error: `Stock insuficiente para ${item[2]}. Disponible: ${stockActual}, requerido: ${cantidad}`
-          });
-        }
-      }
-
-      for (const item of items) {
-        await db.run(`UPDATE productos SET stock_actual = stock_actual - ? WHERE id = ?`, [item[1], item[0]]);
-        try {
-          await db.run(
-            `INSERT INTO stock_movimientos (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_nuevo, motivo)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [item[0], req.usuario.id, 'venta_salida', item[1], item[3], Number(item[3]) - Number(item[1]), `Venta desde cotizacion ${id}`]
-          );
-        } catch (error) {
-          if (!String(error.message || '').includes('stock_movimientos')) {
-            console.error('Error al registrar salida de stock:', error.message);
-          }
-        }
       }
 
       // Generar número factura
@@ -332,21 +403,35 @@ class CotizacionController {
       const facturaNumero = `FAC-${year}${month}-${String(count + 1).padStart(4, '0')}`;
       const facturaFecha = fecha.toISOString();
 
-      // Marcarla como facturada
-      await db.run(`UPDATE cotizaciones SET estado = 'facturada', actualizado_en = CURRENT_TIMESTAMP, factura_numero = ?, factura_fecha = ? WHERE id = ?`, 
-        [facturaNumero, facturaFecha, id]);
+      await db.run('BEGIN');
+
+      try {
+        if (!stockDescontado) {
+          await descontarStockCotizacion(db, req, id);
+        }
+
+        await db.run(
+          `UPDATE cotizaciones SET estado = 'facturada', stock_descontado = ?, actualizado_en = CURRENT_TIMESTAMP, factura_numero = ?, factura_fecha = ? WHERE id = ?`,
+          [STOCK_FLAG_TRUE(db), facturaNumero, facturaFecha, id]
+        );
+        await db.run('COMMIT');
+      } catch (error) {
+        await db.run('ROLLBACK');
+        throw error;
+      }
+
       saveDb();
       await audit(req, {
         accion: 'facturar',
         entidad: 'cotizacion',
         entidad_id: id,
-        detalle: { factura_numero: facturaNumero }
+        detalle: { factura_numero: facturaNumero, stock_descontado: true }
       });
 
-      res.json({ message: 'Convertida a venta exitosamente. Stock descontado.', factura_numero: facturaNumero });
+      res.json({ message: 'Convertida a venta facturada exitosamente.', factura_numero: facturaNumero });
     } catch (error) {
       console.error('Error al facturar la venta:', error);
-      res.status(500).json({ error: 'Error interno del servidor al facturar' });
+      res.status(500).json({ error: error.message || 'Error interno del servidor al facturar' });
     }
   }
 
@@ -412,22 +497,45 @@ class CotizacionController {
   async delete(req, res) {
     try {
       const db = await initDb();
-      const currentResult = await db.exec(`SELECT estado FROM cotizaciones WHERE id = ${Number(req.params.id)}`);
+      const id = Number(req.params.id);
+
+      if (!Number.isInteger(id)) {
+        return res.status(400).json({ error: 'ID de cotizacion invalido' });
+      }
+
+      const currentResult = await db.exec(`SELECT estado, stock_descontado FROM cotizaciones WHERE id = ${id}`);
       if (currentResult.length > 0 && currentResult[0].values.length > 0 && currentResult[0].values[0][0] === 'facturada') {
         return res.status(400).json({ error: 'Una venta facturada no puede eliminarse' });
       }
 
-      await db.run(`DELETE FROM cotizaciones WHERE id = ?`, [req.params.id]);
+      const stockDescontado = currentResult.length > 0 && currentResult[0].values.length > 0
+        ? isStockDiscounted(currentResult[0].values[0][1])
+        : false;
+
+      await db.run('BEGIN');
+
+      try {
+        if (stockDescontado) {
+          await reponerStockCotizacion(db, req, id);
+        }
+
+        await db.run(`DELETE FROM cotizaciones WHERE id = ?`, [id]);
+        await db.run('COMMIT');
+      } catch (error) {
+        await db.run('ROLLBACK');
+        throw error;
+      }
       saveDb();
       await audit(req, {
         accion: 'eliminar',
         entidad: 'cotizacion',
-        entidad_id: Number(req.params.id)
+        entidad_id: id,
+        detalle: { stock_repuesto: stockDescontado }
       });
       res.json({ message: 'Cotización eliminada correctamente' });
     } catch (error) {
       console.error('Error al eliminar cotización:', error);
-      res.status(500).json({ error: 'Error interno del servidor' });
+      res.status(500).json({ error: error.message || 'Error interno del servidor' });
     }
   }
 

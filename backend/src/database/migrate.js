@@ -83,6 +83,7 @@ async function migrate() {
       validez_dias INTEGER DEFAULT 15,
       fecha_validez DATE,
       estado TEXT DEFAULT 'pendiente',
+      stock_descontado INTEGER DEFAULT 0,
       enviado_email INTEGER DEFAULT 0,
       creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
       actualizado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -93,6 +94,16 @@ async function migrate() {
     )
   `);
   saveDb();
+
+  const cotizacionColumnsResult = await db.exec(`PRAGMA table_info(cotizaciones)`);
+  const cotizacionColumns = cotizacionColumnsResult.length > 0
+    ? cotizacionColumnsResult[0].values.map(row => row[1])
+    : [];
+
+  if (!cotizacionColumns.includes('stock_descontado')) {
+    await db.run(`ALTER TABLE cotizaciones ADD COLUMN stock_descontado INTEGER DEFAULT 0`);
+    saveDb();
+  }
 
   // Tabla de items de cotización
   await db.run(`
