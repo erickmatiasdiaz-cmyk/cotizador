@@ -240,7 +240,7 @@ const Configuraciones = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Moneda (Ej: MXN, USD)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Moneda (Ej: CLP, USD)</label>
               <input
                 type="text"
                 name="MONEDA"

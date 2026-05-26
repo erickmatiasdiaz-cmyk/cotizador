@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm, useFieldArray, Controller } from 'react-hook-form';
 import { getClientes, getProductos, createCotizacion } from '../services/api';
+import { formatCurrency } from '../utils/formatters';
 
 const CotizacionForm = () => {
   const navigate = useNavigate();
@@ -144,7 +145,7 @@ const CotizacionForm = () => {
                       <option value="">Seleccionar</option>
                       {productos.map(prod => (
                         <option key={prod.id} value={prod.id}>
-                          {prod.nombre} - ${prod.precio_unitario} (Stock: {prod.stock_actual})
+                          {prod.nombre} - {formatCurrency(prod.precio_unitario)} (Stock: {prod.stock_actual})
                         </option>
                       ))}
                     </select>

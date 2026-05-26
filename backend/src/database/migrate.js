@@ -179,7 +179,7 @@ async function migrate() {
     ['SUPERMERCADO_EMAIL', 'contacto@supermercado.com'],
     ['SUPERMERCADO_LOGO', ''],
     ['IVA_PORCENTAJE', '16'],
-    ['MONEDA', 'MXN']
+    ['MONEDA', 'CLP']
   ];
 
   for (const [clave, valor] of configDefaults) {

@@ -99,7 +99,7 @@ insert into configuracion (clave, valor) values
   ('SUPERMERCADO_EMAIL', 'contacto@supermercado.com'),
   ('SUPERMERCADO_LOGO', ''),
   ('IVA_PORCENTAJE', '16'),
-  ('MONEDA', 'MXN')
+  ('MONEDA', 'CLP')
 on conflict (clave) do nothing;
 
 insert into usuarios (nombre, email, password, rol)
