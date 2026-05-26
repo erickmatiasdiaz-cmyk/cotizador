@@ -9,6 +9,7 @@ import CotizacionForm from './pages/CotizacionForm';
 import CotizacionDetail from './pages/CotizacionDetail';
 import Clientes from './pages/Clientes';
 import Productos from './pages/Productos';
+import Reportes from './pages/Reportes';
 import Configuraciones from './pages/Configuraciones';
 import Categorias from './pages/Categorias';
 
@@ -50,6 +51,7 @@ const AppRoutes = () => {
               <Route path="/cotizaciones/:id" element={<CotizacionDetail />} />
               <Route path="/clientes" element={<Clientes />} />
               <Route path="/productos" element={<AdminOnly usuario={usuario}><Productos /></AdminOnly>} />
+              <Route path="/reportes" element={<AdminOnly usuario={usuario}><Reportes /></AdminOnly>} />
               <Route path="/configuraciones" element={<AdminOnly usuario={usuario}><Configuraciones /></AdminOnly>} />
               <Route path="/categorias" element={<AdminOnly usuario={usuario}><Categorias /></AdminOnly>} />
               <Route path="*" element={<Navigate to="/" />} />

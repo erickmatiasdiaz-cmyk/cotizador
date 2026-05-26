@@ -17,6 +17,7 @@ const Layout = ({ children }) => {
     { path: '/cotizaciones/nueva', label: 'Nueva cotizacion', icon: '+' },
     { path: '/clientes', label: 'Clientes', icon: 'CL' },
     { path: '/productos', label: 'Productos', icon: 'PR', adminOnly: true },
+    { path: '/reportes', label: 'Reportes', icon: 'RP', adminOnly: true },
     { path: '/categorias', label: 'Categorias', icon: 'CA', adminOnly: true },
     { path: '/configuraciones', label: 'Configuracion', icon: 'CF', adminOnly: true },
     { path: '/catalogo', label: 'Catalogo web', icon: 'WEB' }
