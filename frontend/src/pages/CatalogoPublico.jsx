@@ -5,6 +5,11 @@ import { formatCurrency } from '../utils/formatters';
 import { useAuth } from '../context/AuthContext';
 import { DEFAULT_BRAND_THEME, getBrandThemeVars, getLogoPalette } from '../utils/brandTheme';
 
+const normalizeText = (value) => String(value || '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase();
+
 const CatalogoPublico = () => {
   const { usuario } = useAuth();
   const [config, setConfig] = useState(null);
@@ -85,15 +90,15 @@ const CatalogoPublico = () => {
   const totalItems = carrito.reduce((sum, item) => sum + item.cantidad, 0);
 
   const filteredProductos = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
+    const normalizedSearch = normalizeText(search.trim());
     return productos.filter(producto => {
       const matchesCategory =
-        categoryFilter === 'all' || producto.categoria_id === Number(categoryFilter);
+        categoryFilter === 'all' || String(producto.categoria_id) === String(categoryFilter);
       const matchesSearch =
         !normalizedSearch ||
-        producto.nombre?.toLowerCase().includes(normalizedSearch) ||
-        producto.descripcion?.toLowerCase().includes(normalizedSearch) ||
-        producto.categoria?.toLowerCase().includes(normalizedSearch);
+        normalizeText(producto.nombre).includes(normalizedSearch) ||
+        normalizeText(producto.descripcion).includes(normalizedSearch) ||
+        normalizeText(producto.categoria).includes(normalizedSearch);
 
       return matchesCategory && matchesSearch;
     });
@@ -292,7 +297,7 @@ const CatalogoPublico = () => {
                 <h2 className="mt-1 text-2xl font-black text-slate-950">
                   {categoryFilter === 'all'
                     ? 'Catalogo completo'
-                    : categorias.find(categoria => categoria.id === Number(categoryFilter))?.nombre}
+                    : categorias.find(categoria => String(categoria.id) === String(categoryFilter))?.nombre}
                 </h2>
               </div>
               <span className="text-sm font-semibold text-slate-500">{filteredProductos.length} resultados</span>
