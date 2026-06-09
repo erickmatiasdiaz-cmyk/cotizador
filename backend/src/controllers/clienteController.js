@@ -60,12 +60,17 @@ class ClienteController {
       }
 
       const db = await initDb();
-      await db.run(`INSERT INTO clientes (nombre, empresa, rfc, email, telefono, direccion, tipo) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [nombre, empresa || null, rfc || null, email || null, telefono || null, direccion || null, tipo || 'natural']);
+      const insertResult = await db.query(
+        `INSERT INTO clientes (nombre, empresa, rfc, email, telefono, direccion, tipo)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         RETURNING id`,
+        [nombre, empresa || null, rfc || null, email || null, telefono || null, direccion || null, tipo || 'natural']
+      );
       saveDb();
 
-      const result = await db.exec(`SELECT last_insert_rowid()`);
-      const id = result[0].values[0][0];
+      const id = insertResult.length > 0 && insertResult[0].values.length > 0
+        ? insertResult[0].values[0][0]
+        : (await db.query(`SELECT last_insert_rowid()`))[0].values[0][0];
 
       res.status(201).json({ id, nombre, empresa, rfc, email, telefono, direccion, tipo: tipo || 'natural' });
     } catch (error) {

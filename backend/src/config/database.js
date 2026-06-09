@@ -1,10 +1,10 @@
 const initSqlJs = require('sql.js');
 const fs = require('fs');
 const path = require('path');
-const { Client } = require('pg');
+const { Pool } = require('pg');
 
 let db = null;
-let pgClient = null;
+let pgPool = null;
 let initPromise = null;
 
 const dataDir = path.join(__dirname, '..', '..', 'data');
@@ -20,12 +20,15 @@ async function initDb() {
   initPromise = (async () => {
     try {
       if (process.env.DATABASE_URL) {
-        pgClient = new Client({
+        pgPool = new Pool({
           connectionString: process.env.DATABASE_URL,
-          ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false }
+          ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
+          max: Number(process.env.DATABASE_POOL_MAX || 10),
+          idleTimeoutMillis: Number(process.env.DATABASE_IDLE_TIMEOUT_MS || 30000),
+          connectionTimeoutMillis: Number(process.env.DATABASE_CONNECTION_TIMEOUT_MS || 10000)
         });
-        await pgClient.connect();
-        db = createPostgresCompatDb(pgClient);
+        await pgPool.query('SELECT 1');
+        db = createPostgresCompatDb(pgPool);
         console.log('Base de datos Supabase/Postgres conectada');
         return db;
       }
@@ -39,9 +42,11 @@ async function initDb() {
       if (fs.existsSync(dbPath)) {
         const fileBuffer = fs.readFileSync(dbPath);
         db = new SQL.Database(fileBuffer);
+        decorateSqliteDb(db);
         console.log('📂 Base de datos cargada desde archivo');
       } else {
         db = new SQL.Database();
+        decorateSqliteDb(db);
         console.log('🆕 Nueva base de datos creada en memoria');
       }
       return db;
@@ -51,6 +56,7 @@ async function initDb() {
       }
       const SQL = await initSqlJs();
       db = new SQL.Database();
+      decorateSqliteDb(db);
       return db;
     } finally {
       initPromise = null; // Limpiar la promesa una vez finalizado
@@ -75,7 +81,6 @@ function saveDb() {
 function normalizePostgresQuery(query) {
   return query
     .replace(/INSERT OR IGNORE INTO/gi, 'INSERT INTO')
-    .replace(/last_insert_rowid\(\)/gi, 'lastval()')
     .replace(/strftime\('%Y',\s*([^)]+)\)\s*=\s*'(\d{4})'/gi, 'EXTRACT(YEAR FROM $1) = $2')
     .replace(/date\('now',\s*'-7 days'\)/gi, "CURRENT_DATE - INTERVAL '7 days'")
     .replace(/\s+COLLATE\s+NOCASE/gi, '')
@@ -95,16 +100,87 @@ function toSqlJsResult(result) {
   }];
 }
 
-function createPostgresCompatDb(client) {
+function querySqlite(sqliteDb, query, params = []) {
+  if (!params || params.length === 0) {
+    return sqliteDb.exec(query);
+  }
+
+  const stmt = sqliteDb.prepare(query);
+  const columns = stmt.getColumnNames ? stmt.getColumnNames() : [];
+  const values = [];
+
+  try {
+    stmt.bind(params);
+    while (stmt.step()) {
+      values.push(stmt.get());
+    }
+  } finally {
+    stmt.free();
+  }
+
+  if (values.length === 0 && columns.length === 0) return [];
+  return [{ columns, values }];
+}
+
+function decorateSqliteDb(sqliteDb) {
+  sqliteDb.isPostgres = false;
+  sqliteDb.query = async (query, params = []) => querySqlite(sqliteDb, query, params);
+  sqliteDb.transaction = async (callback) => {
+    await sqliteDb.run('BEGIN');
+    try {
+      const result = await callback(sqliteDb);
+      await sqliteDb.run('COMMIT');
+      saveDb();
+      return result;
+    } catch (error) {
+      await sqliteDb.run('ROLLBACK');
+      throw error;
+    }
+  };
+  return sqliteDb;
+}
+
+function createPostgresCompatDb(client, pool = client) {
   return {
     isPostgres: true,
     async exec(query) {
       const result = await client.query(normalizePostgresQuery(query));
       return toSqlJsResult(result);
     },
+    async query(query, params = []) {
+      const sql = toPostgresParams(normalizePostgresQuery(query));
+      const result = await client.query(sql, params);
+      return toSqlJsResult(result);
+    },
     async run(query, params = []) {
       const sql = toPostgresParams(normalizePostgresQuery(query));
       await client.query(sql, params);
+    },
+    async transaction(callback) {
+      if (!pool?.connect) {
+        await client.query('BEGIN');
+        try {
+          const result = await callback(createPostgresCompatDb(client, null));
+          await client.query('COMMIT');
+          return result;
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
+      }
+
+      const transactionClient = await pool.connect();
+      try {
+        await transactionClient.query('BEGIN');
+        const result = await callback(createPostgresCompatDb(transactionClient, null));
+        await transactionClient.query('COMMIT');
+        return result;
+      } catch (error) {
+        await transactionClient.query('ROLLBACK');
+        throw error;
+      } finally {
+        transactionClient.release();
+      }
     },
     prepare(query) {
       const sql = toPostgresParams(normalizePostgresQuery(query));

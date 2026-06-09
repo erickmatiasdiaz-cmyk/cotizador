@@ -121,14 +121,15 @@ class AuthController {
       }
 
       const hashedPassword = bcrypt.hashSync(password, 10);
-      await db.run(
-        'INSERT INTO usuarios (nombre, email, password, rol) VALUES (?, ?, ?, ?)',
+      const insertResult = await db.query(
+        'INSERT INTO usuarios (nombre, email, password, rol) VALUES (?, ?, ?, ?) RETURNING id',
         [nombre, email, hashedPassword, rolNormalizado]
       );
       saveDb();
 
-      const result = await db.exec('SELECT last_insert_rowid()');
-      const id = result[0].values[0][0];
+      const id = insertResult.length > 0 && insertResult[0].values.length > 0
+        ? insertResult[0].values[0][0]
+        : (await db.query('SELECT last_insert_rowid()'))[0].values[0][0];
       await audit(req, {
         accion: 'crear',
         entidad: 'usuario',
