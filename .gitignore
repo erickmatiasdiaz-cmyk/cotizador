@@ -9,3 +9,10 @@ test.pdf
 scratch/
 
 .vercel
+
+# Herramientas y artefactos locales
+.claude/
+.qwen/
+stress-test.js
+stitch_hive_visit_form/
+stitch_hive_visit_form.zip

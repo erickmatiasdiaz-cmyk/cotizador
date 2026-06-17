@@ -271,43 +271,58 @@ class CotizacionController {
         return res.status(400).json({ error: 'Cliente invalido' });
       }
 
+      // Consolidar items por producto (validacion en memoria, sin abrir conexion a la BD)
+      const itemsPorProducto = new Map();
+      for (const item of items) {
+        const productoId = Number(item.producto_id);
+        const cantidad = Number(item.cantidad);
+
+        if (!Number.isInteger(productoId) || !Number.isFinite(cantidad) || cantidad <= 0) {
+          return res.status(400).json({ error: 'Todos los items deben tener producto y cantidad valida' });
+        }
+
+        const current = itemsPorProducto.get(productoId) || {
+          producto_id: productoId,
+          cantidad: 0,
+          precio_unitario_override: item.precio_unitario
+        };
+        current.cantidad += cantidad;
+        itemsPorProducto.set(productoId, current);
+      }
+
       const created = await db.transaction(async (tx) => {
-        const clienteResult = await tx.query(`SELECT id FROM clientes WHERE id = ?`, [clienteId]);
-        if (!firstRow(clienteResult)) {
+        // Validar cliente y leer el IVA en una sola consulta (1 round-trip en vez de 2)
+        const headResult = await tx.query(
+          `SELECT
+             (SELECT id FROM clientes WHERE id = ?) AS cliente_id,
+             (SELECT valor FROM configuracion WHERE clave = ?) AS iva`,
+          [clienteId, 'IVA_PORCENTAJE']
+        );
+        const headRow = firstRow(headResult);
+        if (!headRow || headRow[0] === null || headRow[0] === undefined) {
           const error = new Error('Cliente no encontrado');
           error.statusCode = 404;
           throw error;
         }
-
-        const itemsPorProducto = new Map();
-        for (const item of items) {
-          const productoId = Number(item.producto_id);
-          const cantidad = Number(item.cantidad);
-
-          if (!Number.isInteger(productoId) || !Number.isFinite(cantidad) || cantidad <= 0) {
-            const error = new Error('Todos los items deben tener producto y cantidad valida');
-            error.statusCode = 400;
-            throw error;
-          }
-
-          const current = itemsPorProducto.get(productoId) || {
-            producto_id: productoId,
-            cantidad: 0,
-            precio_unitario_override: item.precio_unitario
-          };
-          current.cantidad += cantidad;
-          itemsPorProducto.set(productoId, current);
-        }
+        const ivaPorcentaje = headRow[1] != null ? parseFloat(headRow[1]) : 16;
 
         let subtotal = 0;
         const itemsValidados = [];
 
+        // Traer todos los productos en una sola consulta (evita N round-trips por item)
+        const ids = [...itemsPorProducto.keys()];
+        const placeholders = ids.map(() => '?').join(', ');
+        const prodResult = await tx.query(
+          `SELECT id, nombre, precio_unitario, stock_actual FROM productos WHERE id IN (${placeholders})`,
+          ids
+        );
+        const productosById = new Map();
+        for (const prodRow of rows(prodResult)) {
+          productosById.set(Number(prodRow[0]), prodRow);
+        }
+
         for (const item of itemsPorProducto.values()) {
-          const prodResult = await tx.query(
-            `SELECT id, nombre, precio_unitario, stock_actual FROM productos WHERE id = ?`,
-            [item.producto_id]
-          );
-          const prodRow = firstRow(prodResult);
+          const prodRow = productosById.get(item.producto_id);
 
           if (!prodRow) {
             const error = new Error(`Producto ${item.producto_id} no encontrado`);
@@ -342,9 +357,6 @@ class CotizacionController {
           });
         }
 
-        const configResult = await tx.query(`SELECT valor FROM configuracion WHERE clave = ?`, ['IVA_PORCENTAJE']);
-        const configRow = firstRow(configResult);
-        const ivaPorcentaje = configRow ? parseFloat(configRow[0]) : 16;
         const descuentoMonto = descuento_porcentaje ? subtotal * (descuento_porcentaje / 100) : 0;
         const subtotalConDescuento = subtotal - descuentoMonto;
         const iva = subtotalConDescuento * (ivaPorcentaje / 100);
@@ -366,13 +378,17 @@ class CotizacionController {
         const insertRow = firstRow(insertResult);
         const cotizacionId = insertRow ? insertRow[0] : firstRow(await tx.query(`SELECT last_insert_rowid()`))[0];
 
+        // Insertar todos los items en un solo INSERT multi-fila
+        const valuesPlaceholders = itemsValidados.map(() => '(?, ?, ?, ?, ?)').join(', ');
+        const itemParams = [];
         for (const item of itemsValidados) {
-          await tx.run(
-            `INSERT INTO cotizacion_items (cotizacion_id, producto_id, cantidad, precio_unitario, subtotal)
-             VALUES (?, ?, ?, ?, ?)`,
-            [cotizacionId, item.producto_id, item.cantidad, item.precio_unitario, item.subtotal]
-          );
+          itemParams.push(cotizacionId, item.producto_id, item.cantidad, item.precio_unitario, item.subtotal);
         }
+        await tx.run(
+          `INSERT INTO cotizacion_items (cotizacion_id, producto_id, cantidad, precio_unitario, subtotal)
+           VALUES ${valuesPlaceholders}`,
+          itemParams
+        );
 
         return { cotizacionId, numero, total };
       });
@@ -390,101 +406,6 @@ class CotizacionController {
         numero: created.numero,
         message: 'Cotizacion creada exitosamente'
       });
-
-      // Verificar cliente
-      const clienteResult = await db.exec(`SELECT id FROM clientes WHERE id = ${cliente_id}`);
-      if (clienteResult.length === 0 || clienteResult[0].values.length === 0) {
-        return res.status(404).json({ error: 'Cliente no encontrado' });
-      }
-
-      // Generar número
-      const fecha = new Date();
-      const year = fecha.getFullYear();
-      const month = String(fecha.getMonth() + 1).padStart(2, '0');
-      const countResult = await db.exec(`SELECT COUNT(*) FROM cotizaciones WHERE strftime('%Y', creado_en) = '${year}'`);
-      const count = countResult.length > 0 ? countResult[0].values[0][0] : 0;
-      const numero = `COT-${year}${month}-${String(count + 1).padStart(4, '0')}`;
-
-      // Calcular totales y validar stock disponible.
-      let subtotal = 0;
-      const itemsValidados = [];
-
-      for (const item of items) {
-        const productoId = Number(item.producto_id);
-        const cantidad = Number(item.cantidad);
-
-        if (!Number.isInteger(productoId) || !Number.isFinite(cantidad) || cantidad <= 0) {
-          return res.status(400).json({ error: 'Todos los items deben tener producto y cantidad valida' });
-        }
-
-        const prodResult = await db.exec(`SELECT id, nombre, precio_unitario, stock_actual FROM productos WHERE id = ${productoId}`);
-        if (prodResult.length === 0 || prodResult[0].values.length === 0) {
-          return res.status(404).json({ error: `Producto ${productoId} no encontrado` });
-        }
-
-        const prodRow = prodResult[0].values[0];
-        const stockActual = Number(prodRow[3]);
-
-        if (cantidad > stockActual) {
-          return res.status(400).json({
-            error: `Stock insuficiente para ${prodRow[1]}. Disponible: ${stockActual}`
-          });
-        }
-
-        const precioUnitario = item.precio_unitario !== undefined && item.precio_unitario !== null
-          ? Number(item.precio_unitario)
-          : Number(prodRow[2]);
-
-        if (!Number.isFinite(precioUnitario) || precioUnitario < 0) {
-          return res.status(400).json({ error: `Precio invalido para ${prodRow[1]}` });
-        }
-
-        const itemSubtotal = cantidad * precioUnitario;
-        subtotal += itemSubtotal;
-        itemsValidados.push({ producto_id: productoId, cantidad, precio_unitario: precioUnitario, subtotal: itemSubtotal });
-      }
-
-      const configResult = await db.exec(`SELECT valor FROM configuracion WHERE clave = 'IVA_PORCENTAJE'`);
-      const ivaPorcentaje = configResult.length > 0 ? parseFloat(configResult[0].values[0][0]) : 16;
-      const descuentoMonto = descuento_porcentaje ? subtotal * (descuento_porcentaje / 100) : 0;
-      const subtotalConDescuento = subtotal - descuentoMonto;
-      const iva = subtotalConDescuento * (ivaPorcentaje / 100);
-      const total = subtotalConDescuento + iva;
-
-      const fechaValidez = new Date();
-      fechaValidez.setDate(fechaValidez.getDate() + (validez_dias || 15));
-
-      // Insertar cotización
-      await db.run(`INSERT INTO cotizaciones 
-        (numero, cliente_id, usuario_id, subtotal, iva, descuento_porcentaje, 
-         descuento_monto, total, notas, validez_dias, fecha_validez) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [numero, cliente_id, req.usuario.id, subtotal, iva, descuento_porcentaje || 0,
-         descuentoMonto, total, notas || null, validez_dias || 15,
-         fechaValidez.toISOString().split('T')[0]]);
-      saveDb();
-
-      const cotizacionResult = await db.exec(`SELECT id FROM cotizaciones WHERE numero = '${numero}'`);
-      const cotizacionId = cotizacionResult[0].values[0][0];
-
-      // Insertar items
-      const insertItem = db.prepare(`
-        INSERT INTO cotizacion_items (cotizacion_id, producto_id, cantidad, precio_unitario, subtotal)
-        VALUES (?, ?, ?, ?, ?)
-      `);
-
-      for (const item of itemsValidados) {
-        await insertItem.run([cotizacionId, item.producto_id, item.cantidad, item.precio_unitario, item.subtotal]);
-      }
-      saveDb();
-      await audit(req, {
-        accion: 'crear',
-        entidad: 'cotizacion',
-        entidad_id: cotizacionId,
-        detalle: { numero, total }
-      });
-
-      res.status(201).json({ id: cotizacionId, message: 'Cotización creada exitosamente' });
     } catch (error) {
       console.error('Error al crear cotización:', error);
       res.status(error.statusCode || 500).json({ error: error.message || 'Error interno del servidor' });
@@ -743,14 +664,18 @@ class CotizacionController {
   async enviarEmail(req, res) {
     try {
       const db = await initDb();
-      const result = await db.exec(`
-        SELECT cl.email, c.numero 
-        FROM cotizaciones c 
-        JOIN clientes cl ON c.cliente_id = cl.id 
-        WHERE c.id = ${req.params.id}
-      `);
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) {
+        return res.status(400).json({ error: 'ID de cotizacion invalido' });
+      }
+      const result = await db.query(`
+        SELECT cl.email, c.numero
+        FROM cotizaciones c
+        JOIN clientes cl ON c.cliente_id = cl.id
+        WHERE c.id = ?
+      `, [id]);
 
-      if (result.length === 0 || !result[0].values[0][0]) {
+      if (result.length === 0 || result[0].values.length === 0 || !result[0].values[0][0]) {
         return res.status(400).json({ error: 'El cliente no tiene correo electrónico' });
       }
 
@@ -760,15 +685,15 @@ class CotizacionController {
       const { enviarCotizacionEmail } = require('../utils/emailService');
       const { generarPDFCotizacion } = require('../utils/pdfGenerator');
 
-      const doc = await generarPDFCotizacion(req.params.id);
-      
+      const doc = await generarPDFCotizacion(id);
+
       const buffers = [];
       doc.on('data', buffers.push.bind(buffers));
       doc.on('end', async () => {
         const pdfData = Buffer.concat(buffers);
         try {
           await enviarCotizacionEmail(emailCliente, pdfData, numeroCoti);
-          await db.run(`UPDATE cotizaciones SET enviado_email = 1 WHERE id = ${req.params.id}`);
+          await db.run(`UPDATE cotizaciones SET enviado_email = 1 WHERE id = ?`, [id]);
           saveDb();
           res.json({ message: 'Email enviado correctamente' });
         } catch (emailError) {

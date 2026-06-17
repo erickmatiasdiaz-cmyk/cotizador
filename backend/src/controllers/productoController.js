@@ -28,7 +28,8 @@ class ProductoController {
     try {
       const { search, categoria_id } = req.query;
       const db = await initDb();
-      
+      const params = [];
+
       let query = `
         SELECT p.id, p.nombre, p.descripcion, p.categoria_id, c.nombre as categoria,
                p.precio_unitario, p.stock_actual, p.unidad_medida, p.imagen_url,
@@ -39,14 +40,20 @@ class ProductoController {
       `;
 
       if (search) {
-        query += ` AND (p.nombre LIKE '%${search}%' OR p.descripcion LIKE '%${search}%')`;
+        const like = `%${search}%`;
+        query += ` AND (p.nombre LIKE ? OR p.descripcion LIKE ?)`;
+        params.push(like, like);
       }
       if (categoria_id) {
-        query += ` AND p.categoria_id = ${categoria_id}`;
+        const catId = Number(categoria_id);
+        if (Number.isInteger(catId)) {
+          query += ` AND p.categoria_id = ?`;
+          params.push(catId);
+        }
       }
       query += ` ORDER BY p.nombre ASC`;
 
-      const result = await db.exec(query);
+      const result = await db.query(query, params);
       const productos = result.length > 0 ? result[0].values.map(row => ({
         id: row[0], nombre: row[1], descripcion: row[2], categoria_id: row[3],
         categoria: row[4], precio_unitario: row[5], stock_actual: row[6],
@@ -64,14 +71,18 @@ class ProductoController {
   async getById(req, res) {
     try {
       const db = await initDb();
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) {
+        return res.status(400).json({ error: 'ID de producto invalido' });
+      }
       const query = `
         SELECT p.id, p.nombre, p.descripcion, p.categoria_id, c.nombre as categoria,
                p.precio_unitario, p.stock_actual, p.unidad_medida, p.imagen_url
         FROM productos p
         LEFT JOIN categorias c ON p.categoria_id = c.id
-        WHERE p.id = ${req.params.id}
+        WHERE p.id = ?
       `;
-      const result = await db.exec(query);
+      const result = await db.query(query, [id]);
       
       if (result.length === 0 || result[0].values.length === 0) {
         return res.status(404).json({ error: 'Producto no encontrado' });
@@ -126,7 +137,7 @@ class ProductoController {
     try {
       const { nombre, descripcion, categoria_id, precio_unitario, stock_actual, unidad_medida, imagen_url } = req.body;
       const db = await initDb();
-      const previousResult = await db.exec(`SELECT stock_actual FROM productos WHERE id = ${Number(req.params.id)}`);
+      const previousResult = await db.query(`SELECT stock_actual FROM productos WHERE id = ?`, [Number(req.params.id)]);
       const previousStock = previousResult.length > 0 && previousResult[0].values.length > 0
         ? Number(previousResult[0].values[0][0])
         : 0;
@@ -225,7 +236,7 @@ class ProductoController {
         if (!nombre || !precio_unitario) continue;
 
         // Comprobar si existe
-        const existsResult = await db.exec(`SELECT id, stock_actual FROM productos WHERE nombre = '${nombre.replace(/'/g, "''")}'`);
+        const existsResult = await db.query(`SELECT id, stock_actual FROM productos WHERE nombre = ?`, [nombre]);
         
         if (existsResult.length > 0 && existsResult[0].values.length > 0) {
           // Existe: actualizar

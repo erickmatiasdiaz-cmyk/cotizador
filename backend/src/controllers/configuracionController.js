@@ -40,7 +40,7 @@ class ConfiguracionController {
         if (!clavesPermitidas.has(clave)) continue;
         
         // Verificamos si existe la clave en la tabla
-        const existe = await db.exec(`SELECT id FROM configuracion WHERE clave = '${clave}'`);
+        const existe = await db.query(`SELECT id FROM configuracion WHERE clave = ?`, [clave]);
         const existeClave = existe.length > 0 && existe[0].values.length > 0;
 
         if (existeClave) {

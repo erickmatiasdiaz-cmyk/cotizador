@@ -27,8 +27,12 @@ class CategoriaController {
   async getById(req, res) {
     try {
       const db = await initDb();
-      const result = await db.exec(`SELECT id, nombre, descripcion FROM categorias WHERE id = ${req.params.id}`);
-      
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) {
+        return res.status(400).json({ error: 'ID de categoria invalido' });
+      }
+      const result = await db.query(`SELECT id, nombre, descripcion FROM categorias WHERE id = ?`, [id]);
+
       if (result.length === 0 || result[0].values.length === 0) {
         return res.status(404).json({ error: 'Categoría no encontrada' });
       }

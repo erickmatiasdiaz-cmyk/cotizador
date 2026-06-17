@@ -10,14 +10,17 @@ class ClienteController {
       const params = [];
 
       if (search) {
-        query += ` AND (nombre LIKE '%${search}%' OR empresa LIKE '%${search}%' OR email LIKE '%${search}%' OR rfc LIKE '%${search}%')`;
+        const like = `%${search}%`;
+        query += ` AND (nombre LIKE ? OR empresa LIKE ? OR email LIKE ? OR rfc LIKE ?)`;
+        params.push(like, like, like, like);
       }
       if (tipo) {
-        query += ` AND tipo = '${tipo}'`;
+        query += ` AND tipo = ?`;
+        params.push(tipo);
       }
       query += ` ORDER BY nombre ASC`;
 
-      const result = await db.exec(query);
+      const result = await db.query(query, params);
       const clientes = result.length > 0 ? result[0].values.map(row => ({
         id: row[0], nombre: row[1], empresa: row[2], rfc: row[3],
         email: row[4], telefono: row[5], direccion: row[6],
@@ -34,8 +37,12 @@ class ClienteController {
   async getById(req, res) {
     try {
       const db = await initDb();
-      const result = await db.exec(`SELECT id, nombre, empresa, rfc, email, telefono, direccion, tipo, creado_en FROM clientes WHERE id = ${req.params.id}`);
-      
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) {
+        return res.status(400).json({ error: 'ID de cliente invalido' });
+      }
+      const result = await db.query(`SELECT id, nombre, empresa, rfc, email, telefono, direccion, tipo, creado_en FROM clientes WHERE id = ?`, [id]);
+
       if (result.length === 0 || result[0].values.length === 0) {
         return res.status(404).json({ error: 'Cliente no encontrado' });
       }

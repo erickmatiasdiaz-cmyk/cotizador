@@ -73,7 +73,7 @@ class PublicController {
 
       // 1. Gestionar Cliente
       let cliente_id;
-      const clienteResult = await db.exec(`SELECT id FROM clientes WHERE lower(email) = lower('${email.replace(/'/g, "''")}')`);
+      const clienteResult = await db.query(`SELECT id FROM clientes WHERE lower(email) = lower(?)`, [email]);
       const clienteRow = clienteResult.length > 0 && clienteResult[0].values.length > 0
         ? clienteResult[0].values[0]
         : null;
@@ -118,7 +118,7 @@ class PublicController {
           continue;
         }
 
-        const productoResult = await db.exec(`SELECT nombre, precio_unitario, stock_actual FROM productos WHERE id = ${productoId}`);
+        const productoResult = await db.query(`SELECT nombre, precio_unitario, stock_actual FROM productos WHERE id = ?`, [productoId]);
         const productoRow = productoResult.length > 0 && productoResult[0].values.length > 0
           ? productoResult[0].values[0]
           : null;
@@ -171,7 +171,7 @@ class PublicController {
       saveDb();
 
       // Recuperar ID de manera segura basada en el numero que es UNIQUE
-      const ordenResult = await db.exec(`SELECT id FROM cotizaciones WHERE numero = '${numero}'`);
+      const ordenResult = await db.query(`SELECT id FROM cotizaciones WHERE numero = ?`, [numero]);
       const ordenRow = ordenResult[0].values[0];
       const cotizacionId = ordenRow[0];
 

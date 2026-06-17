@@ -3,7 +3,12 @@ const { initDb } = require('../config/database');
 
 async function generarPDFCotizacion(cotizacionId, res) {
   const db = await initDb();
-  
+  const id = Number(cotizacionId);
+  if (!Number.isInteger(id)) {
+    if (res) return res.status(400).json({ error: 'ID de cotizacion invalido' });
+    throw new Error('ID de cotizacion invalido');
+  }
+
   const query = `
     SELECT 
       c.id, c.numero, c.cliente_id, COALESCE(cl.nombre, '(Cliente eliminado)') as cliente_nombre, 
@@ -17,10 +22,10 @@ async function generarPDFCotizacion(cotizacionId, res) {
     FROM cotizaciones c
     LEFT JOIN clientes cl ON c.cliente_id = cl.id
     LEFT JOIN usuarios u ON c.usuario_id = u.id
-    WHERE c.id = ${Number(cotizacionId)}
+    WHERE c.id = ?
   `;
-  
-  const result = await db.exec(query);
+
+  const result = await db.query(query, [id]);
   if (result.length === 0 || result[0].values.length === 0) {
     if (res) return res.status(404).json({ error: 'Cotizacion no encontrada' });
     throw new Error('Cotizacion no encontrada');
@@ -38,15 +43,15 @@ async function generarPDFCotizacion(cotizacionId, res) {
     estado: row[19], creado_en: row[20]
   };
 
-  const itemsResult = await db.exec(`
+  const itemsResult = await db.query(`
     SELECT ci.id, ci.producto_id, p.nombre as producto_nombre,
            p.descripcion as producto_descripcion,
            ci.cantidad, ci.precio_unitario, ci.subtotal
     FROM cotizacion_items ci
     INNER JOIN productos p ON ci.producto_id = p.id
-    WHERE ci.cotizacion_id = ${cotizacionId}
+    WHERE ci.cotizacion_id = ?
     ORDER BY ci.id ASC
-  `);
+  `, [id]);
 
   const items = itemsResult.length > 0 ? itemsResult[0].values.map(row => ({
     id: row[0], producto_id: row[1], producto_nombre: row[2],
@@ -276,7 +281,12 @@ async function generarPDFCotizacion(cotizacionId, res) {
 
 async function generarPDFFactura(cotizacionId, res) {
   const db = await initDb();
-  
+  const id = Number(cotizacionId);
+  if (!Number.isInteger(id)) {
+    if (res) return res.status(400).json({ error: 'ID de cotizacion invalido' });
+    throw new Error('ID de cotizacion invalido');
+  }
+
   const query = `
     SELECT 
       c.id, c.numero, c.cliente_id, COALESCE(cl.nombre, '(Cliente eliminado)') as cliente_nombre, 
@@ -290,10 +300,10 @@ async function generarPDFFactura(cotizacionId, res) {
     FROM cotizaciones c
     LEFT JOIN clientes cl ON c.cliente_id = cl.id
     LEFT JOIN usuarios u ON c.usuario_id = u.id
-    WHERE c.id = ${Number(cotizacionId)}
+    WHERE c.id = ?
   `;
-  
-  const result = await db.exec(query);
+
+  const result = await db.query(query, [id]);
   if (result.length === 0 || result[0].values.length === 0) {
     if(res) return res.status(404).json({ error: 'Cotizacion no encontrada' });
     throw new Error('Cotizacion no encontrada');
@@ -311,14 +321,14 @@ async function generarPDFFactura(cotizacionId, res) {
     estado: row[19], creado_en: row[20], factura_numero: row[21], factura_fecha: row[22]
   };
 
-  const itemsResult = await db.exec(`
+  const itemsResult = await db.query(`
     SELECT ci.id, ci.producto_id, p.nombre as producto_nombre,
            ci.cantidad, ci.precio_unitario, ci.subtotal
     FROM cotizacion_items ci
     INNER JOIN productos p ON ci.producto_id = p.id
-    WHERE ci.cotizacion_id = ${cotizacionId}
+    WHERE ci.cotizacion_id = ?
     ORDER BY ci.id ASC
-  `);
+  `, [id]);
 
   const items = itemsResult.length > 0 ? itemsResult[0].values.map(row => ({
     cantidad: row[3], producto_nombre: row[2],
